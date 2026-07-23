@@ -25,7 +25,8 @@ function defaultsFromRows(rows: Array<{ period: 'morning' | 'evening'; drink: Dr
 }
 
 function isMygateEmail(email: string) {
-  return email.toLowerCase().endsWith('@mygate.in')
+  const normalized = email.toLowerCase()
+  return normalized.endsWith('@mygate.in') || normalized.endsWith('@mygate.com')
 }
 
 async function getCurrentUser(request: Request) {
@@ -39,7 +40,8 @@ async function readProfile(currentUser: { id: string; email: string }) {
     db.select({ period: drinkDefault.period, drink: drinkDefault.drink }).from(drinkDefault).where(eq(drinkDefault.userId, currentUser.id)),
   ])
   const autoCompany = isMygateEmail(currentUser.email) ? 'Mygate' : null
-  const company = autoCompany ?? (userRow[0]?.company as Company | null) ?? null
+  const storedCompany = (userRow[0]?.company as Company | null) ?? null
+  const company = autoCompany ?? (storedCompany === 'Mygate' ? null : storedCompany)
   if (autoCompany && userRow[0]?.company !== autoCompany) {
     await db.update(user).set({ company: autoCompany, updatedAt: new Date() }).where(eq(user.id, currentUser.id))
   }
@@ -61,6 +63,7 @@ export const Route = createFileRoute('/api/profile')({
         const profile = await readProfile(currentUser)
         const company = isMygateEmail(currentUser.email) ? 'Mygate' : body.company
         if (!isCompany(company) || (profile.requiresCompany && !body.company)) return json({ error: 'Choose a company' }, { status: 400 })
+        if (company === 'Mygate' && !isMygateEmail(currentUser.email)) return json({ error: 'Use your Mygate work email to join Mygate.' }, { status: 403 })
         const defaults = body.defaults
         if (!defaults || !isDrink(defaults.morning) || !isDrink(defaults.evening)) return json({ error: 'Choose both default drinks' }, { status: 400 })
         const validatedDefaults: DrinkChoice = { morning: defaults.morning, evening: defaults.evening }

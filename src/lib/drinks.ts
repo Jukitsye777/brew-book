@@ -1,4 +1,4 @@
-export const drinks = ['Tea', 'Coffee', 'Green tea', 'Milk', 'No drink'] as const
+export const drinks = ['Tea', 'Coffee', 'Green tea', 'Milk', 'Black Coffee', 'Black Tea', 'No drink'] as const
 export const periods = ['morning', 'evening'] as const
 export const companies = ['Mygate'] as const
 
@@ -31,7 +31,8 @@ async function request<T>(input: RequestInfo | URL, init?: RequestInit): Promise
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
   if (!response.ok) {
-    throw new Error((await response.text()) || `Request failed with status ${response.status}`)
+    const body = await response.json().catch(() => null) as { error?: string } | null
+    throw new Error(body?.error || `Request failed with status ${response.status}`)
   }
   return response.json() as Promise<T>
 }

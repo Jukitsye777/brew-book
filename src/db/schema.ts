@@ -11,7 +11,7 @@ import {
 } from 'drizzle-orm/pg-core'
 
 export const drinkPeriod = pgEnum('drink_period', ['morning', 'evening'])
-export const drinkChoice = pgEnum('drink_choice', ['Tea', 'Coffee', 'Green tea', 'Milk', 'No drink'])
+export const drinkChoice = pgEnum('drink_choice', ['Tea', 'Coffee', 'Green tea', 'Milk', 'Black Coffee', 'Black Tea', 'No drink'])
 export const drinkSource = pgEnum('drink_source', ['default', 'manual'])
 
 export const user = pgTable('user', {
