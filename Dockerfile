@@ -25,7 +25,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
-ENV PORT=3002
+ENV PORT=3003
 
 RUN apk add --no-cache curl
 RUN npm install -g @dotenvx/dotenvx
