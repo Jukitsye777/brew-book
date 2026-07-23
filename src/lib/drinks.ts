@@ -1,6 +1,6 @@
 export const drinks = ['Tea', 'Coffee', 'Green tea', 'Milk', 'No drink'] as const
 export const periods = ['morning', 'evening'] as const
-export const companies = ['Mygate', 'Other'] as const
+export const companies = ['Mygate'] as const
 
 export type Drink = (typeof drinks)[number]
 export type Period = (typeof periods)[number]

@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   ArrowRight,
   CalendarDays,
   Check,
@@ -18,6 +19,7 @@ import { completeOnboarding, getDrinkDay, getProfile, saveDefault, saveResponse,
 type AppState = { user: User | null; defaults: DrinkChoice; entries: Record<string, PollRecord[]> }
 type View = 'today' | 'history' | 'defaults'
 type OpenPoll = { date: string; period: Period } | null
+type OnboardingState = { company: Company | ''; defaults: DrinkChoice; step: 'company' | 'morning' | 'evening' }
 
 const periodDetails: Array<{ id: Period; label: string; helper: string }> = [
   { id: 'morning', label: 'Morning', helper: 'Before the first prep round' },
@@ -44,7 +46,9 @@ function App() {
   const [openPoll, setOpenPoll] = useState<OpenPoll>(null)
   const [error, setError] = useState<string | null>(null)
   const [profileReady, setProfileReady] = useState(false)
-  const [onboarding, setOnboarding] = useState<{ company: Company | ''; defaults: DrinkChoice } | null>(null)
+  const [onboarding, setOnboarding] = useState<OnboardingState | null>(null)
+  const [localUser, setLocalUser] = useState<User | null>(null)
+  const [localComplete, setLocalComplete] = useState(false)
   const { data: session, isPending: authPending } = authClient.useSession()
   const sessionUserId = session?.user?.id
   const sessionUserName = session?.user?.name
@@ -55,6 +59,12 @@ function App() {
   const todayPolls = state.entries[todayKey] ?? []
   useEffect(() => {
     let cancelled = false
+    if (localUser) {
+      setState({ ...initialState, user: localUser })
+      setOnboarding({ company: '', defaults: initialState.defaults, step: 'company' })
+      setProfileReady(true)
+      return () => { cancelled = true }
+    }
     if (!sessionUserId || !sessionUserName || !sessionUserEmail) { setState(initialState); setProfileReady(false); setOnboarding(null); return () => { cancelled = true } }
     const user = { id: sessionUserId, name: sessionUserName, email: sessionUserEmail, image: sessionUserImage }
     setState((current) => ({ ...current, user }))
@@ -63,7 +73,7 @@ function App() {
       if (cancelled) return
       setState((current) => ({ ...current, user, defaults: profile.defaults }))
       if (profile.needsOnboarding) {
-        setOnboarding({ company: profile.company ?? '', defaults: profile.defaults })
+        setOnboarding({ company: profile.company ?? '', defaults: profile.defaults, step: 'company' })
         setProfileReady(true)
         return null
       }
@@ -75,7 +85,7 @@ function App() {
       })
     }).catch((reason: unknown) => { if (!cancelled) { setProfileReady(true); setError(reason instanceof Error ? reason.message : 'Unable to load your profile') } })
     return () => { cancelled = true }
-  }, [sessionUserEmail, sessionUserId, sessionUserImage, sessionUserName])
+  }, [localUser, sessionUserEmail, sessionUserId, sessionUserImage, sessionUserName])
   useEffect(() => {
     if (!sessionUserId || view !== 'history') return
     let cancelled = false
@@ -97,10 +107,12 @@ function App() {
   }, [openPoll, sessionUserId, state.entries])
 
   function signIn() { void authClient.signIn.social({ provider: 'google', callbackURL: '/' }) }
-  function signOut() { void authClient.signOut(); setState((current) => ({ ...current, user: null })) }
+  function signOut() { void authClient.signOut(); setLocalUser(null); setLocalComplete(false); setState((current) => ({ ...current, user: null })) }
+  function signUpLocally() { setLocalComplete(false); setLocalUser({ id: 'local-test-user', name: 'Local test user', email: 'local@brewbook.test' }) }
   async function finishOnboarding() {
     const currentOnboarding = onboarding
     if (!currentOnboarding?.company) return
+    if (localUser) { setOnboarding(null); setLocalComplete(true); return }
     try {
       const profile = await completeOnboarding({ company: currentOnboarding.company, defaults: currentOnboarding.defaults })
       const day = await getDrinkDay(todayKey)
@@ -135,7 +147,9 @@ function App() {
   }
 
   if (authPending) return <AuthLoading />
-  if (!session?.user || !state.user) return <SignInPage signIn={signIn} />
+  if (!session?.user && !localUser) return <SignInPage signIn={signIn} onLocalSignUp={import.meta.env.DEV ? signUpLocally : undefined} />
+  if (localComplete) return <LocalSetupComplete onReset={signOut} />
+  if (!state.user) return <AuthLoading />
   if (!profileReady) return <AuthLoading message="Loading your workspace..." />
   if (onboarding) return <OnboardingPage state={onboarding} setState={setOnboarding} onComplete={finishOnboarding} />
   const visiblePolls = view === 'history' ? (state.entries[historyDate] ?? []) : todayPolls
@@ -153,8 +167,9 @@ function Nav({ view, setView }: { view: View; setView: (view: View) => void }) {
 function BrandMark({ className = 'size-8', iconSize = 17, iconColor = 'currentColor' }: { className?: string; iconSize?: number; iconColor?: string }) { return <div className={cx('grid place-items-center rounded-[10px] bg-[#5a3c26] text-[#fff9ef]', className)}><Coffee color={iconColor} size={iconSize} strokeWidth={2.2} /></div> }
 
 function AuthLoading({ message = 'Checking your account...' }: { message?: string }) { return <main className="grid min-h-svh place-items-center bg-[#f6f5f1]"><output aria-label={message} className="size-10 animate-spin rounded-full border-2 border-[#e6e0d6] border-t-[#5a3c26]" /></main> }
-function SignInPage({ signIn }: { signIn: () => void }) { return <main className="relative grid min-h-svh place-items-center overflow-hidden bg-[#f6f5f1] px-5 py-10 text-[#fff9ef]"><div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden text-[#c9ad90]/35"><Coffee className="absolute -right-24 -top-20 size-[30rem] rotate-12" strokeWidth={0.7} /><Coffee className="absolute -bottom-32 -left-24 size-[24rem] -rotate-12 text-[#e0d0bf]" strokeWidth={0.7} /></div><section className="relative z-10 flex w-full max-w-sm flex-col items-center rounded-3xl bg-[#5a3c26] px-6 py-9 text-center shadow-[0_20px_60px_rgba(77,57,38,0.2)] sm:px-8"><BrandMark className="size-16 rounded-[18px] bg-[#fff9ef] text-[#5a3c26]" iconColor="#5a3c26" iconSize={30} /><h1 className="mt-7 font-serif text-5xl leading-tight">BrewBook</h1><p className="mt-4 max-w-xs text-[15px] leading-6 text-[#e7d8c4]">Use your work email to continue.</p><button onClick={signIn} type="button" className="mt-8 flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-[#fff9ef] text-sm font-semibold text-[#5a3c26] shadow-[0_12px_30px_rgba(38,24,16,0.22)] transition hover:bg-white"><img alt="" className="size-5" src="/google-g.png" />Continue with Google<ArrowRight size={17} /></button></section></main> }
-function OnboardingPage({ state, setState, onComplete }: { state: { company: Company | ''; defaults: DrinkChoice }; setState: (state: { company: Company | ''; defaults: DrinkChoice }) => void; onComplete: () => void }) { const companyLocked = state.company === 'Mygate'; return <main className="min-h-svh bg-[#5a3c26] px-4 py-8 text-[#33271f] sm:grid sm:place-items-center"><section className="mx-auto w-full max-w-lg rounded-3xl bg-[#fffdf9] p-5 shadow-2xl sm:p-8"><div className="flex items-center gap-2.5"><BrandMark /><span className="font-serif text-xl font-semibold">BrewBook</span></div><p className="mt-8 text-xs font-semibold uppercase tracking-[0.16em] text-[#a36f43]">First setup</p><h1 className="mt-2 font-serif text-3xl text-[#33271f]">Set up your drinks</h1><p className="mt-2 text-sm leading-6 text-[#887f74]">Choose your company and the drinks BrewBook should use when you do not change your poll.</p><div className="mt-7"><p className="text-sm font-semibold">Company</p>{companyLocked ? <div className="mt-2 rounded-xl border border-[#a36f43] bg-[#f6ece1] px-3.5 py-3 text-sm font-semibold text-[#68452e]">Mygate</div> : <><div className="mt-2 grid grid-cols-2 gap-2">{(['Mygate', 'Other'] as Company[]).map((company) => <button key={company} onClick={() => setState({ ...state, company })} type="button" className={cx('min-h-11 rounded-xl border px-3 text-left text-sm font-semibold transition', state.company === company ? 'border-[#a36f43] bg-[#f6ece1] text-[#68452e]' : 'border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]')}>{company === 'Other' ? 'Other company' : company}{state.company === company && <Check className="float-right" size={15} />}</button>)}</div><p className="mt-2 text-xs leading-5 text-[#9a9084]">Used a personal email by mistake? Sign out and try again with your work email.</p></>}</div><div className="mt-7 grid gap-5">{periodDetails.map((period) => <div key={period.id}><div className="flex items-baseline justify-between gap-3"><p className="text-sm font-semibold">{period.label} default</p><p className="text-xs text-[#9a9084]">{period.helper}</p></div><div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">{drinks.map((drink) => <button key={drink} onClick={() => setState({ ...state, defaults: { ...state.defaults, [period.id]: drink } })} type="button" className={cx('flex min-h-11 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition', state.defaults[period.id] === drink ? 'border-[#a36f43] bg-[#f6ece1] text-[#68452e]' : 'border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]')}>{drink}{state.defaults[period.id] === drink && <Check size={15} />}</button>)}</div></div>)}</div><button disabled={!state.company} onClick={onComplete} type="button" className="mt-8 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#5a3c26] text-sm font-semibold text-white transition hover:bg-[#68452e] disabled:cursor-not-allowed disabled:opacity-45">Open BrewBook<ArrowRight size={17} /></button></section></main> }
+function SignInPage({ signIn, onLocalSignUp }: { signIn: () => void; onLocalSignUp?: () => void }) { return <main className="relative grid min-h-svh place-items-center overflow-hidden bg-[#f6f5f1] px-5 py-10 text-[#fff9ef]"><div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden text-[#c9ad90]/35"><Coffee className="absolute -right-24 -top-20 size-[30rem] rotate-12" strokeWidth={0.7} /><Coffee className="absolute -bottom-32 -left-24 size-[24rem] -rotate-12 text-[#e0d0bf]" strokeWidth={0.7} /></div><section className="relative z-10 flex w-full max-w-sm flex-col items-center rounded-3xl bg-[#5a3c26] px-6 py-9 text-center shadow-[0_20px_60px_rgba(77,57,38,0.2)] sm:px-8"><BrandMark className="size-16 rounded-[18px] bg-[#fff9ef] text-[#5a3c26]" iconColor="#5a3c26" iconSize={30} /><h1 className="mt-7 font-serif text-5xl leading-tight">BrewBook</h1><p className="mt-4 max-w-xs text-[15px] leading-6 text-[#e7d8c4]">Use your work email to continue.</p><button onClick={signIn} type="button" className="mt-8 flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-[#fff9ef] text-sm font-semibold text-[#5a3c26] shadow-[0_12px_30px_rgba(38,24,16,0.22)] transition hover:bg-white"><img alt="" className="size-5" src="/google-g.png" />Continue with Google<ArrowRight size={17} /></button>{onLocalSignUp && <button onClick={onLocalSignUp} type="button" className="mt-3 text-xs font-semibold text-[#e7d8c4] underline decoration-[#c9ad90] underline-offset-4">Sign up locally</button>}</section></main> }
+function OnboardingPage({ state, setState, onComplete }: { state: OnboardingState; setState: (state: OnboardingState) => void; onComplete: () => void }) { const period = state.step === 'morning' ? periodDetails[0] : state.step === 'evening' ? periodDetails[1] : null; const activePeriod = period ?? periodDetails[0]; const next = () => { if (state.step === 'company') setState({ ...state, step: 'morning' }); else if (state.step === 'morning') setState({ ...state, step: 'evening' }); else onComplete() }; const back = () => { if (state.step === 'morning') setState({ ...state, step: 'company' }); if (state.step === 'evening') setState({ ...state, step: 'morning' }); }; return <main className="flex min-h-svh items-center justify-center bg-[#5a3c26] px-4 py-8 text-[#33271f]"><section className="mx-auto w-full max-w-lg rounded-3xl bg-[#fffdf9] p-5 shadow-2xl sm:p-8"><h1 className="mt-2 font-serif text-3xl text-[#33271f]">{state.step === 'company' ? 'Choose your company' : `Choose your ${period?.label.toLowerCase()} default`}</h1>{state.step === 'company' ? <div className="mt-8 grid gap-2"><button onClick={() => setState({ ...state, company: 'Mygate' })} type="button" className={cx('flex min-h-14 items-center justify-between rounded-xl border px-4 text-left text-base font-semibold transition', state.company === 'Mygate' ? 'border-[#a36f43] bg-[#f6ece1] text-[#68452e]' : 'border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]')}>Mygate{state.company === 'Mygate' && <Check size={17} />}</button></div> : <div className="mt-8 grid grid-cols-1 gap-2 sm:grid-cols-5">{drinks.map((drink) => <button key={drink} onClick={() => setState({ ...state, defaults: { ...state.defaults, [activePeriod.id]: drink } })} type="button" className={cx('flex min-h-12 items-center justify-between whitespace-nowrap rounded-xl border px-3 text-left text-sm font-semibold transition', state.defaults[activePeriod.id] === drink ? 'border-[#a36f43] bg-[#f6ece1] text-[#68452e]' : 'border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]')}>{drink}{state.defaults[activePeriod.id] === drink && <Check size={15} />}</button>)}</div>}<div className="mt-8 flex items-center gap-2">{state.step !== 'company' && <button onClick={back} type="button" className="flex min-h-11 items-center gap-2 rounded-xl border border-[#e6e0d6] px-4 text-sm font-semibold text-[#68452e] transition hover:bg-[#fdf8f1]"><ArrowLeft size={16} />Back</button>}<button disabled={!state.company || (!!period && !state.defaults[period.id])} onClick={next} type="button" className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[#5a3c26] px-4 text-sm font-semibold text-white transition hover:bg-[#68452e] disabled:cursor-not-allowed disabled:opacity-45">{state.step === 'evening' ? 'Finish setup' : 'Next'}<ArrowRight size={17} /></button></div></section></main> }
+function LocalSetupComplete({ onReset }: { onReset: () => void }) { return <main className="grid min-h-svh place-items-center bg-[#5a3c26] px-5 py-10 text-[#fff9ef]"><section className="w-full max-w-sm rounded-3xl bg-[#fffdf9] p-8 text-center text-[#33271f] shadow-2xl"><div className="mx-auto grid size-14 place-items-center rounded-2xl bg-[#5a3c26] text-[#fff9ef]"><Check size={26} /></div><h1 className="mt-6 font-serif text-3xl">Setup complete</h1><p className="mt-2 text-sm leading-6 text-[#887f74]">The local test flow is complete. The app is not loaded in local signup mode.</p><button onClick={onReset} type="button" className="mt-7 min-h-11 rounded-xl bg-[#5a3c26] px-4 text-sm font-semibold text-white">Run setup again</button></section></main> }
 function TodayView({ entry, todayPolls, updateEntry, onOpen }: { entry: DrinkChoice; todayPolls: PollRecord[]; updateEntry: (period: Period, drink: Drink) => void; onOpen: (period: Period) => void }) { return <div className="grid gap-5"><PageHeader eyebrow={displayDate(todayKey)} title="Today" action={`${todayPolls.length} people`} /><div className="grid gap-3">{periodDetails.map((period) => <DrinkPoll key={period.id} period={period} polls={todayPolls} selected={entry[period.id]} editable onSelect={(drink) => updateEntry(period.id, drink)} onOpen={() => onOpen(period.id)} />)}</div></div> }
 function HistoryView({ date, setDate, polls, onOpen }: { date: string; setDate: (date: string) => void; polls: PollRecord[]; onOpen: (period: Period) => void }) { const dates = Array.from({ length: 7 }, (_, index) => dateKeyOffset(index + 1)); return <div className="grid gap-5"><PageHeader eyebrow="History" title={displayDate(date)} action={polls.length ? `${polls.length} people` : 'No responses'} /><div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-0 sm:-mx-6 sm:px-6">{dates.map((item) => <button key={item} onClick={() => setDate(item)} type="button" className={cx('shrink-0 rounded-lg border px-3 py-2 text-left text-sm font-semibold transition', date === item ? 'border-[#5a3c26] bg-[#5a3c26] text-white' : 'border-[#e6e0d6] bg-[#fffdf9] text-[#887f74]')}><span className="block text-xs font-normal opacity-75">{displayDate(item).split(',')[0]}</span>{displayChipDate(item)}</button>)}</div><div className="mt-1 grid gap-3">{periodDetails.map((period) => <DrinkPoll key={period.id} period={period} polls={polls} editable={false} onOpen={() => onOpen(period.id)} />)}</div></div> }
 function DefaultsView({ defaults, updateDefault }: { defaults: DrinkChoice; updateDefault: (period: Period, drink: Drink) => void }) { return <div className="grid gap-5"><PageHeader eyebrow="Defaults" title="Default drinks" action="Saved automatically" /><div className="grid gap-3">{periodDetails.map((period) => <DefaultDrinkSetting key={period.id} period={period} selected={defaults[period.id]} onSelect={(drink) => updateDefault(period.id, drink)} />)}</div></div> }
