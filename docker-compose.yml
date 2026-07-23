@@ -1,0 +1,9 @@
+services:
+  app:
+    image: ghcr.io/jojipanackal/brew-book:latest
+    container_name: brew-book
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:3002:3002"

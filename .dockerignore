@@ -1,0 +1,17 @@
+node_modules
+.output
+.nitro
+.tanstack
+.wrangler
+.vinxi
+dist
+dist-ssr
+.git
+.github
+.env
+.env.*
+!.env.production
+.env.keys
+*.local
+*.log
+coverage

@@ -1,0 +1,138 @@
+import {
+  ArrowRight,
+  CalendarDays,
+  Check,
+  ChevronRight,
+  Coffee,
+  Eye,
+  History,
+  LogOut,
+  Settings,
+  X,
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
+
+import { authClient } from '#/lib/auth-client'
+import { getDrinkDay, saveDefault, saveResponse, drinks, periods, type Drink, type DrinkChoice, type Period, type PollRecord, type User } from '#/lib/drinks'
+
+type AppState = { user: User | null; defaults: DrinkChoice; entries: Record<string, PollRecord[]> }
+type View = 'today' | 'history' | 'defaults'
+type OpenPoll = { date: string; period: Period } | null
+
+const periodDetails: Array<{ id: Period; label: string; helper: string }> = [
+  { id: 'morning', label: 'Morning', helper: 'Before the first prep round' },
+  { id: 'evening', label: 'Evening', helper: 'For the afternoon round' },
+]
+const dateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' })
+const displayDateFormatter = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Kolkata' })
+const todayKey = dateFormatter.format(new Date())
+const initialState: AppState = { user: null, defaults: { morning: 'No drink', evening: 'No drink' }, entries: {} }
+
+function dateKeyOffset(offset: number) { const date = new Date(); date.setDate(date.getDate() - offset); return dateFormatter.format(date) }
+function displayDate(dateKey: string) { return displayDateFormatter.format(new Date(`${dateKey}T12:00:00`)) }
+function initials(name: string) { return name.split(' ').map((part) => part[0]).join('') }
+function readState(): AppState { return initialState }
+function cx(...classes: Array<string | false | null | undefined>) { return classes.filter(Boolean).join(' ') }
+function countChoices(entries: DrinkChoice[]) { return periods.reduce((result, period) => { result[period] = drinks.reduce<Record<string, number>>((counts, drink) => { counts[drink] = entries.filter((entry) => entry[period] === drink).length; return counts }, {}); return result }, {} as Record<Period, Record<string, number>>) }
+
+function App() {
+  const [state, setState] = useState<AppState>(readState)
+  const [view, setView] = useState<View>('today')
+  const [historyDate, setHistoryDate] = useState(dateKeyOffset(1))
+  const [openPoll, setOpenPoll] = useState<OpenPoll>(null)
+  const [error, setError] = useState<string | null>(null)
+  const { data: session, isPending: authPending } = authClient.useSession()
+  const sessionUserId = session?.user?.id
+  const sessionUserName = session?.user?.name
+  const sessionUserEmail = session?.user?.email
+  const sessionUserImage = session?.user?.image
+  const todayPoll = state.user ? state.entries[todayKey]?.find((entry) => entry.user.email === state.user?.email) : undefined
+  const todaysEntry = todayPoll?.choices ?? state.defaults
+  const todayPolls = state.entries[todayKey] ?? []
+  useEffect(() => {
+    let cancelled = false
+    if (!sessionUserId || !sessionUserName || !sessionUserEmail) { setState(initialState); return () => { cancelled = true } }
+    const user = { id: sessionUserId, name: sessionUserName, email: sessionUserEmail, image: sessionUserImage }
+    setState((current) => ({ ...current, user }))
+    void getDrinkDay(todayKey).then((day) => {
+      if (cancelled) return
+      setState((current) => ({ ...current, user, defaults: day.defaults, entries: { ...current.entries, [todayKey]: day.responses } }))
+      setError(null)
+    }).catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : 'Unable to load today\'s drinks') })
+    return () => { cancelled = true }
+  }, [sessionUserEmail, sessionUserId, sessionUserImage, sessionUserName])
+  useEffect(() => {
+    if (!sessionUserId || view !== 'history') return
+    let cancelled = false
+    void getDrinkDay(historyDate).then((day) => {
+      if (cancelled) return
+      setState((current) => ({ ...current, defaults: day.defaults, entries: { ...current.entries, [historyDate]: day.responses } }))
+      setError(null)
+    }).catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : 'Unable to load history') })
+    return () => { cancelled = true }
+  }, [historyDate, sessionUserId, view])
+  useEffect(() => {
+    if (!sessionUserId || !openPoll || state.entries[openPoll.date]) return
+    let cancelled = false
+    void getDrinkDay(openPoll.date).then((day) => {
+      if (cancelled) return
+      setState((current) => ({ ...current, entries: { ...current.entries, [openPoll.date]: day.responses } }))
+    }).catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : 'Unable to load poll details') })
+    return () => { cancelled = true }
+  }, [openPoll, sessionUserId, state.entries])
+
+  function signIn() { void authClient.signIn.social({ provider: 'google', callbackURL: '/' }) }
+  function signOut() { void authClient.signOut(); setState((current) => ({ ...current, user: null })) }
+  function updateEntry(period: Period, drink: Drink) {
+    if (!state.user) return
+    const existing = state.entries[todayKey]?.find((entry) => entry.user.email === state.user?.email)
+    const choices = { ...(existing?.choices ?? state.defaults), [period]: drink }
+    setState((current) => {
+      if (!current.user) return current
+      const nextEntries = (current.entries[todayKey] ?? []).map((entry) => entry.user.email === current.user?.email ? { ...entry, choices, sources: { ...entry.sources, [period]: 'manual' as const } } : entry)
+      return {
+        ...current,
+        entries: { ...current.entries, [todayKey]: nextEntries },
+      }
+    })
+    void saveResponse({ date: todayKey, period, drink }).then((day) => {
+      setState((current) => ({ ...current, defaults: day.defaults, entries: { ...current.entries, [todayKey]: day.responses } }))
+      setError(null)
+    }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to save your drink'))
+  }
+
+  function updateDefault(period: Period, drink: Drink) {
+    setState((current) => ({ ...current, defaults: { ...current.defaults, [period]: drink } }))
+    void saveDefault({ period, drink }).then((defaults) => { setState((current) => ({ ...current, defaults })); setError(null) }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to save your default'))
+  }
+
+  if (authPending) return <AuthLoading />
+  if (!session?.user || !state.user) return <SignInPage signIn={signIn} />
+  const visiblePolls = view === 'history' ? (state.entries[historyDate] ?? []) : todayPolls
+  const openPollData = openPoll ? (state.entries[openPoll.date] ?? []) : []
+  return <main className="min-h-svh bg-[#f6f5f1] text-[#2d2925] pb-20 lg:pb-0">
+    <header className="border-b border-[#e6e0d6] bg-[#fffdf9]"><div className="mx-auto flex max-w-[1180px] items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8"><div className="flex items-center gap-2.5"><BrandMark /><span className="font-serif text-xl font-semibold tracking-[-0.02em]">BrewBook</span></div><div className="flex items-center gap-2.5"><div className="hidden text-right sm:block"><p className="text-sm font-semibold">{state.user.name}</p><p className="text-xs text-[#887f74]">{state.user.email}</p></div><div className="grid size-9 place-items-center rounded-full bg-[#dfc5a5] text-xs font-semibold text-[#5a3c26]">{initials(state.user.name)}</div><button className="grid size-8 place-items-center rounded-full text-[#887f74] transition hover:bg-[#f1ede6] hover:text-[#5a3c26]" onClick={signOut} type="button" aria-label="Sign out" title="Sign out"><LogOut size={16} /></button></div></div></header>
+    {error && <div className="mx-auto mt-4 max-w-[1180px] px-4 sm:px-6 lg:px-8"><div className="rounded-xl border border-[#e7cfc3] bg-[#fff5f0] px-3 py-2 text-sm text-[#8b4d35]" role="alert">{error}</div></div>}
+    <div className="mx-auto grid max-w-[1180px] gap-6 px-4 py-5 sm:px-6 lg:grid-cols-[190px_1fr] lg:gap-10 lg:px-8 lg:py-8"><aside className="hidden lg:block lg:sticky lg:top-8 lg:h-fit"><Nav view={view} setView={setView} /></aside><section className="min-w-0">{view === 'today' && <TodayView entry={todaysEntry} todayPolls={todayPolls} updateEntry={updateEntry} onOpen={(period) => setOpenPoll({ date: todayKey, period })} />}{view === 'history' && <HistoryView date={historyDate} setDate={setHistoryDate} polls={visiblePolls} onOpen={(period) => setOpenPoll({ date: historyDate, period })} />}{view === 'defaults' && <DefaultsView defaults={state.defaults} updateDefault={updateDefault} />}</section></div>
+    <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[#e6e0d6] bg-[#fffdf9]/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5 backdrop-blur sm:px-4 lg:hidden"><Nav view={view} setView={setView} /></div>
+    {openPoll && <PollDetailsSheet date={openPoll.date} period={openPoll.period} polls={openPollData} onClose={() => setOpenPoll(null)} />}
+  </main>
+}
+
+function Nav({ view, setView }: { view: View; setView: (view: View) => void }) { const items: Array<{ id: View; label: string; icon: React.ReactNode }> = [{ id: 'today', label: 'Today', icon: <CalendarDays size={18} /> }, { id: 'history', label: 'History', icon: <History size={18} /> }, { id: 'defaults', label: 'Defaults', icon: <Settings size={18} /> }]; return <nav className="grid grid-cols-3 gap-2 lg:grid-cols-1">{items.map((item) => <button key={item.id} onClick={() => setView(item.id)} type="button" className={cx('flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-semibold transition lg:flex-row lg:justify-start lg:gap-2 lg:px-3 lg:text-sm', view === item.id ? 'bg-[#5a3c26] text-white' : 'text-[#887f74] hover:bg-[#f1ede6] hover:text-[#5a3c26]')}>{item.icon}<span>{item.label}</span>{view === item.id && <ChevronRight className="ml-auto hidden lg:block" size={15} />}</button>)}</nav> }
+function BrandMark({ className = 'size-8', iconSize = 17 }: { className?: string; iconSize?: number }) { return <div className={cx('grid place-items-center rounded-[10px] bg-[#5a3c26] text-[#fff9ef]', className)}><Coffee size={iconSize} strokeWidth={2.2} /></div> }
+
+function AuthLoading() { return <main className="grid min-h-svh place-items-center bg-[#f6f5f1]"><div className="text-center"><BrandMark /><p className="mt-4 text-sm text-[#887f74]">Checking your account...</p></div></main> }
+function SignInPage({ signIn }: { signIn: () => void }) { return <main className="grid min-h-svh place-items-center bg-[#5a3c26] px-5 py-10 text-[#fff9ef]"><section className="flex w-full max-w-sm flex-col items-center text-center"><BrandMark className="size-16 rounded-[18px]" iconSize={30} /><h1 className="mt-7 font-serif text-5xl leading-tight">BrewBook</h1><p className="mt-4 max-w-xs text-[15px] leading-6 text-[#e7d8c4]">Your office drink register, ready when you are.</p><button onClick={signIn} type="button" className="mt-8 flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-[#fff9ef] text-sm font-semibold text-[#5a3c26] shadow-[0_12px_30px_rgba(38,24,16,0.22)] transition hover:bg-white"><span className="grid size-6 place-items-center rounded-md bg-white text-[#4285f4] font-bold shadow-sm">G</span>Continue with Google<ArrowRight size={17} /></button></section></main> }
+function TodayView({ entry, todayPolls, updateEntry, onOpen }: { entry: DrinkChoice; todayPolls: PollRecord[]; updateEntry: (period: Period, drink: Drink) => void; onOpen: (period: Period) => void }) { return <div className="grid gap-5"><PageHeader eyebrow={displayDate(todayKey)} title="Today" action={`${todayPolls.length} people`} /><div className="grid gap-3">{periodDetails.map((period) => <DrinkPoll key={period.id} period={period} polls={todayPolls} selected={entry[period.id]} editable onSelect={(drink) => updateEntry(period.id, drink)} onOpen={() => onOpen(period.id)} />)}</div></div> }
+function HistoryView({ date, setDate, polls, onOpen }: { date: string; setDate: (date: string) => void; polls: PollRecord[]; onOpen: (period: Period) => void }) { const dates = Array.from({ length: 7 }, (_, index) => dateKeyOffset(index + 1)); return <div className="grid gap-5"><PageHeader eyebrow="History" title={displayDate(date)} action={polls.length ? `${polls.length} people` : 'No responses'} /><div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-0 sm:-mx-6 sm:px-6">{dates.map((item) => <button key={item} onClick={() => setDate(item)} type="button" className={cx('shrink-0 rounded-lg border px-3 py-2 text-left text-sm font-semibold transition', date === item ? 'border-[#5a3c26] bg-[#5a3c26] text-white' : 'border-[#e6e0d6] bg-[#fffdf9] text-[#887f74]')}><span className="block text-xs font-normal opacity-75">{displayDate(item).split(',')[0]}</span>{displayDate(item).split(', ').slice(1).join(', ')}</button>)}</div><div className="mt-1 grid gap-3">{periodDetails.map((period) => <DrinkPoll key={period.id} period={period} polls={polls} editable={false} onOpen={() => onOpen(period.id)} />)}</div></div> }
+function DefaultsView({ defaults, updateDefault }: { defaults: DrinkChoice; updateDefault: (period: Period, drink: Drink) => void }) { return <div className="grid gap-5"><PageHeader eyebrow="Defaults" title="Default drinks" action="Saved automatically" /><div className="grid gap-3">{periodDetails.map((period) => <DefaultDrinkSetting key={period.id} period={period} selected={defaults[period.id]} onSelect={(drink) => updateDefault(period.id, drink)} />)}</div></div> }
+function DefaultDrinkSetting({ period, selected, onSelect }: { period: { id: Period; label: string; helper: string }; selected: Drink; onSelect: (drink: Drink) => void }) { return <section className="rounded-2xl border border-[#e6e0d6] bg-[#fffdf9] p-4 shadow-[0_8px_30px_rgba(77,57,38,0.04)] sm:p-5"><div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#f1ede6] text-[#a36f43]"><Coffee size={17} /></span><div><h2 className="text-sm font-semibold text-[#33271f]">{period.label} default</h2><p className="mt-0.5 text-xs text-[#9a9084]">{period.helper}</p></div></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">{drinks.map((drink) => <button key={drink} onClick={() => onSelect(drink)} type="button" className={cx('flex min-h-11 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition', selected === drink ? 'border-[#a36f43] bg-[#f6ece1] text-[#68452e]' : 'border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]')}>{drink}{selected === drink && <Check size={15} />}</button>)}</div></section> }
+function PageHeader({ eyebrow, title, action }: { eyebrow: string; title: string; action: string }) { return <div className="flex items-end justify-between gap-4 border-b border-[#e6e0d6] pb-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#a36f43]">{eyebrow}</p><h1 className="mt-1 font-serif text-3xl tracking-[-0.03em] text-[#33271f] sm:text-4xl">{title}</h1></div><span className="shrink-0 text-xs font-semibold text-[#9a9084]">{action}</span></div> }
+
+function DrinkPoll({ period, polls, selected, editable, onSelect, onOpen }: { period: { id: Period; label: string; helper: string }; polls: PollRecord[]; selected?: Drink; editable: boolean; onSelect?: (drink: Drink) => void; onOpen?: () => void }) { const counts = countChoices(polls.map((entry) => entry.choices))[period.id]; const total = polls.length; return <div className="overflow-hidden rounded-2xl border border-[#e6e0d6] bg-[#fffdf9] shadow-[0_8px_30px_rgba(77,57,38,0.04)]"><div className="flex items-center justify-between gap-4 border-b border-[#eee8df] px-4 py-3.5 sm:px-5"><span className="flex items-center gap-2.5"><span className="grid size-8 place-items-center rounded-lg bg-[#f1ede6] text-[#a36f43]"><Coffee size={16} /></span><span><span className="block text-sm font-semibold text-[#33271f]">{period.label} drink poll</span><span className="block text-xs text-[#9a9084]">{total} {total === 1 ? 'response' : 'responses'}</span></span></span></div><div className="grid gap-2 p-3 sm:p-4">{drinks.map((drink) => { const count = counts[drink]; const percent = total ? Math.round((counts[drink] / total) * 100) : 0; return <button key={drink} disabled={!editable} onClick={() => onSelect?.(drink)} type="button" className={cx('relative flex min-h-11 items-center justify-between overflow-hidden rounded-xl border px-3.5 text-left text-sm font-semibold', editable ? 'transition hover:border-[#dbc9b6]' : 'cursor-default', selected === drink ? 'border-[#a36f43] bg-[#f6ece1] text-[#68452e]' : 'border-[#eee8df] text-[#665b50]')}><span className="absolute inset-y-0 left-0 bg-[#f6ece1] transition-all" style={{ width: editable ? (selected === drink ? '100%' : '0%') : `${percent}%` }} /><span className="relative">{drink}</span><span className="relative flex items-center gap-2 text-xs text-[#887f74]">{count}{selected === drink && <span className="grid size-5 place-items-center rounded-full bg-[#a36f43] text-white"><Check size={13} strokeWidth={3} /></span>}</span></button> })}</div><button className="mx-3 mb-3 flex min-h-11 w-[calc(100%-1.5rem)] items-center justify-center gap-2 rounded-xl border border-[#e6e0d6] text-sm font-semibold text-[#68452e] transition hover:border-[#a36f43] hover:bg-[#fdf8f1] sm:mx-4 sm:mb-4 sm:w-[calc(100%-2rem)]" onClick={onOpen} type="button"><Eye size={16} />View details</button></div> }
+
+
+function PollDetailsSheet({ date, period, polls, onClose }: { date: string; period: Period; polls: PollRecord[]; onClose: () => void }) { const periodInfo = periodDetails.find((item) => item.id === period); return <div className="fixed inset-0 z-30 flex items-end p-0 sm:items-center sm:justify-center sm:p-4"><button className="absolute inset-0 cursor-default bg-[#2d2925]/30" onClick={onClose} type="button" aria-label="Close poll details" /><section className="relative z-10 max-h-[88svh] w-full overflow-y-auto rounded-t-3xl bg-[#fffdf9] px-4 pb-6 pt-3 shadow-2xl sm:max-w-lg sm:rounded-2xl sm:p-6"><div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[#ddd3c7] sm:hidden" /><div className="flex items-start justify-between border-b border-[#eee8df] pb-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#a36f43]">{date === todayKey ? 'Today' : displayDate(date)}</p><h2 className="mt-1 font-serif text-2xl text-[#33271f]">{periodInfo?.label ?? period} drink poll</h2><p className="mt-1 text-sm text-[#9a9084]">{polls.length} {polls.length === 1 ? 'response' : 'responses'}</p></div><button className="grid size-9 place-items-center rounded-full bg-[#f1ede6] text-[#887f74]" onClick={onClose} type="button" aria-label="Close poll details"><X size={18} /></button></div><div className="mt-5 grid gap-5">{drinks.map((drink) => { const drinkPolls = polls.filter((item) => item.choices[period] === drink); if (!drinkPolls.length) return null; return <section key={drink}><h3 className="mb-2 text-base font-semibold text-[#5a3c26]">{drink}</h3><div className="grid gap-2">{drinkPolls.map((item) => <div className="flex items-center justify-between gap-3 rounded-xl bg-[#f8f5f0] px-3 py-2.5" key={item.user.email}><div className="flex min-w-0 items-center gap-2.5"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-[#eee1d1] text-[11px] font-semibold text-[#68452e]">{initials(item.user.name)}</span><span className="truncate text-sm font-semibold">{item.user.name}</span></div><span className="shrink-0 text-xs text-[#887f74]">{item.sources[period] === 'default' ? 'Default' : 'Manual'}</span></div>)}</div></section> })}</div></section></div> }
+
+export default App
