@@ -13,7 +13,7 @@ import {
 import { useEffect, useState } from 'react'
 
 import { authClient } from '#/lib/auth-client'
-import { getDrinkDay, saveDefault, saveResponse, drinks, periods, type Drink, type DrinkChoice, type Period, type PollRecord, type User } from '#/lib/drinks'
+import { completeOnboarding, getDrinkDay, getProfile, saveDefault, saveResponse, drinks, periods, type Company, type Drink, type DrinkChoice, type Period, type PollRecord, type User } from '#/lib/drinks'
 
 type AppState = { user: User | null; defaults: DrinkChoice; entries: Record<string, PollRecord[]> }
 type View = 'today' | 'history' | 'defaults'
@@ -25,11 +25,13 @@ const periodDetails: Array<{ id: Period; label: string; helper: string }> = [
 ]
 const dateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' })
 const displayDateFormatter = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Kolkata' })
+const chipDateFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Kolkata' })
 const todayKey = dateFormatter.format(new Date())
 const initialState: AppState = { user: null, defaults: { morning: 'No drink', evening: 'No drink' }, entries: {} }
 
 function dateKeyOffset(offset: number) { const date = new Date(); date.setDate(date.getDate() - offset); return dateFormatter.format(date) }
 function displayDate(dateKey: string) { return displayDateFormatter.format(new Date(`${dateKey}T12:00:00`)) }
+function displayChipDate(dateKey: string) { return chipDateFormatter.format(new Date(`${dateKey}T12:00:00`)) }
 function initials(name: string) { return name.split(' ').map((part) => part[0]).join('') }
 function readState(): AppState { return initialState }
 function cx(...classes: Array<string | false | null | undefined>) { return classes.filter(Boolean).join(' ') }
@@ -41,6 +43,8 @@ function App() {
   const [historyDate, setHistoryDate] = useState(dateKeyOffset(1))
   const [openPoll, setOpenPoll] = useState<OpenPoll>(null)
   const [error, setError] = useState<string | null>(null)
+  const [profileReady, setProfileReady] = useState(false)
+  const [onboarding, setOnboarding] = useState<{ company: Company | ''; defaults: DrinkChoice } | null>(null)
   const { data: session, isPending: authPending } = authClient.useSession()
   const sessionUserId = session?.user?.id
   const sessionUserName = session?.user?.name
@@ -51,14 +55,25 @@ function App() {
   const todayPolls = state.entries[todayKey] ?? []
   useEffect(() => {
     let cancelled = false
-    if (!sessionUserId || !sessionUserName || !sessionUserEmail) { setState(initialState); return () => { cancelled = true } }
+    if (!sessionUserId || !sessionUserName || !sessionUserEmail) { setState(initialState); setProfileReady(false); setOnboarding(null); return () => { cancelled = true } }
     const user = { id: sessionUserId, name: sessionUserName, email: sessionUserEmail, image: sessionUserImage }
     setState((current) => ({ ...current, user }))
-    void getDrinkDay(todayKey).then((day) => {
+    setProfileReady(false)
+    void getProfile().then((profile) => {
       if (cancelled) return
-      setState((current) => ({ ...current, user, defaults: day.defaults, entries: { ...current.entries, [todayKey]: day.responses } }))
-      setError(null)
-    }).catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : 'Unable to load today\'s drinks') })
+      setState((current) => ({ ...current, user, defaults: profile.defaults }))
+      if (profile.needsOnboarding) {
+        setOnboarding({ company: profile.company ?? '', defaults: profile.defaults })
+        setProfileReady(true)
+        return null
+      }
+      return getDrinkDay(todayKey).then((day) => {
+        if (cancelled) return
+        setState((current) => ({ ...current, user, defaults: day.defaults, entries: { ...current.entries, [todayKey]: day.responses } }))
+        setProfileReady(true)
+        setError(null)
+      })
+    }).catch((reason: unknown) => { if (!cancelled) { setProfileReady(true); setError(reason instanceof Error ? reason.message : 'Unable to load your profile') } })
     return () => { cancelled = true }
   }, [sessionUserEmail, sessionUserId, sessionUserImage, sessionUserName])
   useEffect(() => {
@@ -83,6 +98,19 @@ function App() {
 
   function signIn() { void authClient.signIn.social({ provider: 'google', callbackURL: '/' }) }
   function signOut() { void authClient.signOut(); setState((current) => ({ ...current, user: null })) }
+  async function finishOnboarding() {
+    const currentOnboarding = onboarding
+    if (!currentOnboarding?.company) return
+    try {
+      const profile = await completeOnboarding({ company: currentOnboarding.company, defaults: currentOnboarding.defaults })
+      const day = await getDrinkDay(todayKey)
+      setState((current) => ({ ...current, defaults: profile.defaults, entries: { ...current.entries, [todayKey]: day.responses } }))
+      setOnboarding(null)
+      setError(null)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Unable to save your setup')
+    }
+  }
   function updateEntry(period: Period, drink: Drink) {
     if (!state.user) return
     const existing = state.entries[todayKey]?.find((entry) => entry.user.email === state.user?.email)
@@ -108,6 +136,8 @@ function App() {
 
   if (authPending) return <AuthLoading />
   if (!session?.user || !state.user) return <SignInPage signIn={signIn} />
+  if (!profileReady) return <AuthLoading message="Loading your workspace..." />
+  if (onboarding) return <OnboardingPage state={onboarding} setState={setOnboarding} onComplete={finishOnboarding} />
   const visiblePolls = view === 'history' ? (state.entries[historyDate] ?? []) : todayPolls
   const openPollData = openPoll ? (state.entries[openPoll.date] ?? []) : []
   return <main className="min-h-svh bg-[#f6f5f1] text-[#2d2925] pb-20 lg:pb-0">
@@ -120,12 +150,13 @@ function App() {
 }
 
 function Nav({ view, setView }: { view: View; setView: (view: View) => void }) { const items: Array<{ id: View; label: string; icon: React.ReactNode }> = [{ id: 'today', label: 'Today', icon: <CalendarDays size={18} /> }, { id: 'history', label: 'History', icon: <History size={18} /> }, { id: 'defaults', label: 'Defaults', icon: <Settings size={18} /> }]; return <nav className="grid grid-cols-3 gap-2 lg:grid-cols-1">{items.map((item) => <button key={item.id} onClick={() => setView(item.id)} type="button" className={cx('flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-semibold transition lg:flex-row lg:justify-start lg:gap-2 lg:px-3 lg:text-sm', view === item.id ? 'bg-[#5a3c26] text-white' : 'text-[#887f74] hover:bg-[#f1ede6] hover:text-[#5a3c26]')}>{item.icon}<span>{item.label}</span>{view === item.id && <ChevronRight className="ml-auto hidden lg:block" size={15} />}</button>)}</nav> }
-function BrandMark({ className = 'size-8', iconSize = 17 }: { className?: string; iconSize?: number }) { return <div className={cx('grid place-items-center rounded-[10px] bg-[#5a3c26] text-[#fff9ef]', className)}><Coffee size={iconSize} strokeWidth={2.2} /></div> }
+function BrandMark({ className = 'size-8', iconSize = 17, iconColor = 'currentColor' }: { className?: string; iconSize?: number; iconColor?: string }) { return <div className={cx('grid place-items-center rounded-[10px] bg-[#5a3c26] text-[#fff9ef]', className)}><Coffee color={iconColor} size={iconSize} strokeWidth={2.2} /></div> }
 
-function AuthLoading() { return <main className="grid min-h-svh place-items-center bg-[#f6f5f1]"><div className="text-center"><BrandMark /><p className="mt-4 text-sm text-[#887f74]">Checking your account...</p></div></main> }
-function SignInPage({ signIn }: { signIn: () => void }) { return <main className="grid min-h-svh place-items-center bg-[#5a3c26] px-5 py-10 text-[#fff9ef]"><section className="flex w-full max-w-sm flex-col items-center text-center"><BrandMark className="size-16 rounded-[18px]" iconSize={30} /><h1 className="mt-7 font-serif text-5xl leading-tight">BrewBook</h1><p className="mt-4 max-w-xs text-[15px] leading-6 text-[#e7d8c4]">Your office drink register, ready when you are.</p><button onClick={signIn} type="button" className="mt-8 flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-[#fff9ef] text-sm font-semibold text-[#5a3c26] shadow-[0_12px_30px_rgba(38,24,16,0.22)] transition hover:bg-white"><span className="grid size-6 place-items-center rounded-md bg-white text-[#4285f4] font-bold shadow-sm">G</span>Continue with Google<ArrowRight size={17} /></button></section></main> }
+function AuthLoading({ message = 'Checking your account...' }: { message?: string }) { return <main className="grid min-h-svh place-items-center bg-[#f6f5f1]"><output aria-label={message} className="size-10 animate-spin rounded-full border-2 border-[#e6e0d6] border-t-[#5a3c26]" /></main> }
+function SignInPage({ signIn }: { signIn: () => void }) { return <main className="relative grid min-h-svh place-items-center overflow-hidden bg-[#f6f5f1] px-5 py-10 text-[#fff9ef]"><div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden text-[#c9ad90]/35"><Coffee className="absolute -right-24 -top-20 size-[30rem] rotate-12" strokeWidth={0.7} /><Coffee className="absolute -bottom-32 -left-24 size-[24rem] -rotate-12 text-[#e0d0bf]" strokeWidth={0.7} /></div><section className="relative z-10 flex w-full max-w-sm flex-col items-center rounded-3xl bg-[#5a3c26] px-6 py-9 text-center shadow-[0_20px_60px_rgba(77,57,38,0.2)] sm:px-8"><BrandMark className="size-16 rounded-[18px] bg-[#fff9ef] text-[#5a3c26]" iconColor="#5a3c26" iconSize={30} /><h1 className="mt-7 font-serif text-5xl leading-tight">BrewBook</h1><p className="mt-4 max-w-xs text-[15px] leading-6 text-[#e7d8c4]">Use your work email to continue.</p><button onClick={signIn} type="button" className="mt-8 flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-[#fff9ef] text-sm font-semibold text-[#5a3c26] shadow-[0_12px_30px_rgba(38,24,16,0.22)] transition hover:bg-white"><img alt="" className="size-5" src="/google-g.png" />Continue with Google<ArrowRight size={17} /></button></section></main> }
+function OnboardingPage({ state, setState, onComplete }: { state: { company: Company | ''; defaults: DrinkChoice }; setState: (state: { company: Company | ''; defaults: DrinkChoice }) => void; onComplete: () => void }) { const companyLocked = state.company === 'Mygate'; return <main className="min-h-svh bg-[#5a3c26] px-4 py-8 text-[#33271f] sm:grid sm:place-items-center"><section className="mx-auto w-full max-w-lg rounded-3xl bg-[#fffdf9] p-5 shadow-2xl sm:p-8"><div className="flex items-center gap-2.5"><BrandMark /><span className="font-serif text-xl font-semibold">BrewBook</span></div><p className="mt-8 text-xs font-semibold uppercase tracking-[0.16em] text-[#a36f43]">First setup</p><h1 className="mt-2 font-serif text-3xl text-[#33271f]">Set up your drinks</h1><p className="mt-2 text-sm leading-6 text-[#887f74]">Choose your company and the drinks BrewBook should use when you do not change your poll.</p><div className="mt-7"><p className="text-sm font-semibold">Company</p>{companyLocked ? <div className="mt-2 rounded-xl border border-[#a36f43] bg-[#f6ece1] px-3.5 py-3 text-sm font-semibold text-[#68452e]">Mygate</div> : <><div className="mt-2 grid grid-cols-2 gap-2">{(['Mygate', 'Other'] as Company[]).map((company) => <button key={company} onClick={() => setState({ ...state, company })} type="button" className={cx('min-h-11 rounded-xl border px-3 text-left text-sm font-semibold transition', state.company === company ? 'border-[#a36f43] bg-[#f6ece1] text-[#68452e]' : 'border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]')}>{company === 'Other' ? 'Other company' : company}{state.company === company && <Check className="float-right" size={15} />}</button>)}</div><p className="mt-2 text-xs leading-5 text-[#9a9084]">Used a personal email by mistake? Sign out and try again with your work email.</p></>}</div><div className="mt-7 grid gap-5">{periodDetails.map((period) => <div key={period.id}><div className="flex items-baseline justify-between gap-3"><p className="text-sm font-semibold">{period.label} default</p><p className="text-xs text-[#9a9084]">{period.helper}</p></div><div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">{drinks.map((drink) => <button key={drink} onClick={() => setState({ ...state, defaults: { ...state.defaults, [period.id]: drink } })} type="button" className={cx('flex min-h-11 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition', state.defaults[period.id] === drink ? 'border-[#a36f43] bg-[#f6ece1] text-[#68452e]' : 'border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]')}>{drink}{state.defaults[period.id] === drink && <Check size={15} />}</button>)}</div></div>)}</div><button disabled={!state.company} onClick={onComplete} type="button" className="mt-8 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#5a3c26] text-sm font-semibold text-white transition hover:bg-[#68452e] disabled:cursor-not-allowed disabled:opacity-45">Open BrewBook<ArrowRight size={17} /></button></section></main> }
 function TodayView({ entry, todayPolls, updateEntry, onOpen }: { entry: DrinkChoice; todayPolls: PollRecord[]; updateEntry: (period: Period, drink: Drink) => void; onOpen: (period: Period) => void }) { return <div className="grid gap-5"><PageHeader eyebrow={displayDate(todayKey)} title="Today" action={`${todayPolls.length} people`} /><div className="grid gap-3">{periodDetails.map((period) => <DrinkPoll key={period.id} period={period} polls={todayPolls} selected={entry[period.id]} editable onSelect={(drink) => updateEntry(period.id, drink)} onOpen={() => onOpen(period.id)} />)}</div></div> }
-function HistoryView({ date, setDate, polls, onOpen }: { date: string; setDate: (date: string) => void; polls: PollRecord[]; onOpen: (period: Period) => void }) { const dates = Array.from({ length: 7 }, (_, index) => dateKeyOffset(index + 1)); return <div className="grid gap-5"><PageHeader eyebrow="History" title={displayDate(date)} action={polls.length ? `${polls.length} people` : 'No responses'} /><div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-0 sm:-mx-6 sm:px-6">{dates.map((item) => <button key={item} onClick={() => setDate(item)} type="button" className={cx('shrink-0 rounded-lg border px-3 py-2 text-left text-sm font-semibold transition', date === item ? 'border-[#5a3c26] bg-[#5a3c26] text-white' : 'border-[#e6e0d6] bg-[#fffdf9] text-[#887f74]')}><span className="block text-xs font-normal opacity-75">{displayDate(item).split(',')[0]}</span>{displayDate(item).split(', ').slice(1).join(', ')}</button>)}</div><div className="mt-1 grid gap-3">{periodDetails.map((period) => <DrinkPoll key={period.id} period={period} polls={polls} editable={false} onOpen={() => onOpen(period.id)} />)}</div></div> }
+function HistoryView({ date, setDate, polls, onOpen }: { date: string; setDate: (date: string) => void; polls: PollRecord[]; onOpen: (period: Period) => void }) { const dates = Array.from({ length: 7 }, (_, index) => dateKeyOffset(index + 1)); return <div className="grid gap-5"><PageHeader eyebrow="History" title={displayDate(date)} action={polls.length ? `${polls.length} people` : 'No responses'} /><div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-0 sm:-mx-6 sm:px-6">{dates.map((item) => <button key={item} onClick={() => setDate(item)} type="button" className={cx('shrink-0 rounded-lg border px-3 py-2 text-left text-sm font-semibold transition', date === item ? 'border-[#5a3c26] bg-[#5a3c26] text-white' : 'border-[#e6e0d6] bg-[#fffdf9] text-[#887f74]')}><span className="block text-xs font-normal opacity-75">{displayDate(item).split(',')[0]}</span>{displayChipDate(item)}</button>)}</div><div className="mt-1 grid gap-3">{periodDetails.map((period) => <DrinkPoll key={period.id} period={period} polls={polls} editable={false} onOpen={() => onOpen(period.id)} />)}</div></div> }
 function DefaultsView({ defaults, updateDefault }: { defaults: DrinkChoice; updateDefault: (period: Period, drink: Drink) => void }) { return <div className="grid gap-5"><PageHeader eyebrow="Defaults" title="Default drinks" action="Saved automatically" /><div className="grid gap-3">{periodDetails.map((period) => <DefaultDrinkSetting key={period.id} period={period} selected={defaults[period.id]} onSelect={(drink) => updateDefault(period.id, drink)} />)}</div></div> }
 function DefaultDrinkSetting({ period, selected, onSelect }: { period: { id: Period; label: string; helper: string }; selected: Drink; onSelect: (drink: Drink) => void }) { return <section className="rounded-2xl border border-[#e6e0d6] bg-[#fffdf9] p-4 shadow-[0_8px_30px_rgba(77,57,38,0.04)] sm:p-5"><div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#f1ede6] text-[#a36f43]"><Coffee size={17} /></span><div><h2 className="text-sm font-semibold text-[#33271f]">{period.label} default</h2><p className="mt-0.5 text-xs text-[#9a9084]">{period.helper}</p></div></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">{drinks.map((drink) => <button key={drink} onClick={() => onSelect(drink)} type="button" className={cx('flex min-h-11 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition', selected === drink ? 'border-[#a36f43] bg-[#f6ece1] text-[#68452e]' : 'border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]')}>{drink}{selected === drink && <Check size={15} />}</button>)}</div></section> }
 function PageHeader({ eyebrow, title, action }: { eyebrow: string; title: string; action: string }) { return <div className="flex items-end justify-between gap-4 border-b border-[#e6e0d6] pb-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#a36f43]">{eyebrow}</p><h1 className="mt-1 font-serif text-3xl tracking-[-0.03em] text-[#33271f] sm:text-4xl">{title}</h1></div><span className="shrink-0 text-xs font-semibold text-[#9a9084]">{action}</span></div> }
