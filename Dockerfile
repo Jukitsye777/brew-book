@@ -33,6 +33,6 @@ RUN npm install -g @dotenvx/dotenvx
 COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/.env.production ./.env.production
 
-EXPOSE 3002
+EXPOSE 3003
 
 CMD ["dotenvx", "run", "-f", ".env.production", "--", "node", ".output/server/index.mjs"]
