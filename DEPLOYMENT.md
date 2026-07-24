@@ -29,7 +29,7 @@ Add these repository secrets under **Settings > Secrets and variables > Actions*
 postgresql://brewadmin:password@host:25060/brewdb?sslmode=require
 ```
 
-The workflow writes the DigitalOcean CA certificate to a temporary file and exposes it through `NODE_EXTRA_CA_CERTS` while migrations run.
+The workflow writes the DigitalOcean CA certificate to a temporary file and exposes it through `NODE_EXTRA_CA_CERTS` while migrations run. The migration script uses the workflow's direct `DATABASE_URL` and certificate inputs, so the migration job does not need to decrypt `.env.production` or receive `DOTENV_PRIVATE_KEY_PRODUCTION` at runtime.
 
 ## Prepare dotenvx production configuration
 

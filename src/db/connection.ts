@@ -17,7 +17,7 @@ export function getPostgresConnectionConfig() {
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) throw new Error('DATABASE_URL is required to connect to Postgres')
 
-  const ca = resolveCertificate(process.env.DATABASE_CA_CERT)
+  const ca = resolveCertificate(process.env.DATABASE_CA_CERT) ?? resolveCertificate(process.env.NODE_EXTRA_CA_CERTS)
   return {
     connectionString: removeSslMode(databaseUrl),
     ssl: ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: true },

@@ -8,8 +8,12 @@ import { getPostgresConnectionConfig } from "../src/db/connection";
 // Ensure we are resolving paths relative to the project root
 const ROOT_DIR = process.cwd();
 
-// Load env variables, including dotenvx-encrypted values.
-loadDotenvx();
+// In CI, DATABASE_URL and NODE_EXTRA_CA_CERTS are injected directly by the
+// workflow. Do not load .env.production there because migrations do not need
+// the encrypted auth/Google values and dotenvx would require its private key.
+if (!process.env.DATABASE_URL) {
+    loadDotenvx();
+}
 
 const databaseConfig = getPostgresConnectionConfig();
 const pool = new Pool(databaseConfig);
