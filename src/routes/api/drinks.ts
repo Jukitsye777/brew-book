@@ -1,4 +1,4 @@
-import { and, eq, gt } from 'drizzle-orm'
+import { and, eq, gt, sql } from 'drizzle-orm'
 import { createFileRoute } from '@tanstack/react-router'
 
 import { db } from '#/db'
@@ -78,7 +78,11 @@ async function ensureTodayResponse(userId: string, date: string, defaults: Drink
   if (date !== todayKey()) return
   await db.insert(drinkResponse).values(periods.map((period) => ({
     id: crypto.randomUUID(), userId, date, period, drink: defaults[period], sugar: sugarDefaults[period], source: 'default' as const,
-  }))).onConflictDoNothing({ target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period] })
+  }))).onConflictDoUpdate({
+    target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period],
+    set: { drink: sql`excluded.drink`, sugar: sql`excluded.sugar`, updatedAt: new Date() },
+    where: eq(drinkResponse.source, 'default'),
+  })
 }
 
 export const Route = createFileRoute('/api/drinks')({
@@ -103,6 +107,7 @@ export const Route = createFileRoute('/api/drinks')({
           if (!isPeriod(body.period) || !isDrink(body.drink) || typeof body.sugar !== 'boolean') return json({ error: 'Invalid default' }, { status: 400 })
           const sugar = body.drink === 'No drink' ? true : body.sugar
           await db.insert(drinkDefault).values({ userId: currentUser.id, period: body.period, drink: body.drink, sugar }).onConflictDoUpdate({ target: [drinkDefault.userId, drinkDefault.period], set: { drink: body.drink, sugar, updatedAt: new Date() } })
+          await db.update(drinkResponse).set({ drink: body.drink, sugar, updatedAt: new Date() }).where(and(eq(drinkResponse.userId, currentUser.id), eq(drinkResponse.date, todayKey()), eq(drinkResponse.period, body.period), eq(drinkResponse.source, 'default')))
           const rows = await db.select({ period: drinkDefault.period, drink: drinkDefault.drink, sugar: drinkDefault.sugar }).from(drinkDefault).where(eq(drinkDefault.userId, currentUser.id))
           return json(defaultsFromRows(rows))
         }

@@ -2,13 +2,16 @@ import { eq, sql } from 'drizzle-orm'
 import { createFileRoute } from '@tanstack/react-router'
 
 import { db } from '#/db'
-import { company, companyAdmin, drinkDefault, user } from '#/db/schema'
+import { company, companyAdmin, drinkDefault, drinkResponse, user } from '#/db/schema'
 import { auth } from '#/lib/auth'
 import { drinks, periods, type Company, type Drink, type DrinkChoice, type SugarChoice } from '#/lib/drinks'
 
 function json(data: unknown, init?: ResponseInit) {
   return Response.json(data, init)
 }
+
+const indiaDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' })
+const todayKey = () => indiaDateFormatter.format(new Date())
 
 function isCompany(value: unknown): value is Company {
   return typeof value === 'string' && value.trim().length > 0
@@ -73,6 +76,7 @@ export const Route = createFileRoute('/api/profile')({
           await tx.update(user).set({ company: companyName, updatedAt: new Date() }).where(eq(user.id, currentUser.id))
           for (const period of periods) {
             await tx.insert(drinkDefault).values({ userId: currentUser.id, period, drink: validatedDefaults[period], sugar: validatedSugarDefaults[period] }).onConflictDoUpdate({ target: [drinkDefault.userId, drinkDefault.period], set: { drink: validatedDefaults[period], sugar: validatedSugarDefaults[period], updatedAt: new Date() } })
+            await tx.insert(drinkResponse).values({ id: crypto.randomUUID(), userId: currentUser.id, date: todayKey(), period, drink: validatedDefaults[period], sugar: validatedSugarDefaults[period], source: 'default' }).onConflictDoUpdate({ target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period], set: { drink: validatedDefaults[period], sugar: validatedSugarDefaults[period], source: 'default', updatedAt: new Date() }, where: eq(drinkResponse.source, 'default') })
           }
         })
         return json(await readProfile(currentUser))
