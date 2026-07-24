@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 
 function resolveCertificate(value: string | undefined) {
   if (!value) return undefined
-  if ((value.startsWith('/') || value.startsWith('./')) && existsSync(value)) return readFileSync(value, 'utf8')
+  if (existsSync(value)) return readFileSync(value, 'utf8')
   return value.includes('\\n') ? value.replaceAll('\\n', '\n') : value
 }
 
