@@ -13,17 +13,47 @@ import {
 export const drinkPeriod = pgEnum('drink_period', ['morning', 'evening'])
 export const drinkChoice = pgEnum('drink_choice', ['Tea', 'Coffee', 'Green tea', 'Milk', 'Black Coffee', 'Black Tea', 'No drink'])
 export const drinkSource = pgEnum('drink_source', ['default', 'manual'])
+export const userRole = pgEnum('user_role', ['user', 'admin', 'guest'])
+export const guestStatus = pgEnum('guest_status', ['pending', 'approved', 'rejected'])
+
+export const company = pgTable('company', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  emailEnding1: text('email_ending_1').notNull(),
+  emailEnding2: text('email_ending_2'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+})
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   company: text('company'),
+  companyId: text('company_id').references(() => company.id, { onDelete: 'set null' }),
+  role: userRole('role').notNull().default('user'),
+  isGuest: boolean('is_guest').notNull().default(false),
+  guestToken: text('guest_token').unique(),
+  guestExpiresAt: timestamp('guest_expires_at', { withTimezone: true }),
+  guestStatus: guestStatus('guest_status'),
+  guestRequestedAt: timestamp('guest_requested_at', { withTimezone: true }),
+  guestReviewedAt: timestamp('guest_reviewed_at', { withTimezone: true }),
   emailVerified: boolean('email_verified').notNull().default(false),
   image: text('image'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
+
+export const companyAdmin = pgTable(
+  'company_admin',
+  {
+    id: text('id').primaryKey(),
+    companyId: text('company_id').notNull().references(() => company.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [unique().on(table.companyId, table.email), index('company_admin_email_idx').on(table.email)],
+)
 
 export const session = pgTable('session', {
   id: text('id').primaryKey(),
@@ -67,6 +97,7 @@ export const drinkDefault = pgTable(
     userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
     period: drinkPeriod('period').notNull(),
     drink: drinkChoice('drink').notNull().default('No drink'),
+    sugar: boolean('sugar').notNull().default(true),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.userId, table.period] })],
@@ -80,6 +111,7 @@ export const drinkResponse = pgTable(
     date: date('date').notNull(),
     period: drinkPeriod('period').notNull(),
     drink: drinkChoice('drink').notNull(),
+    sugar: boolean('sugar').notNull().default(true),
     source: drinkSource('source').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

@@ -10,7 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiAdminRouteImport } from './routes/api/admin'
+import { Route as ApiCompaniesRouteImport } from './routes/api/companies'
 import { Route as ApiDrinksRouteImport } from './routes/api/drinks'
+import { Route as ApiGuestRouteImport } from './routes/api/guest'
 import { Route as ApiProfileRouteImport } from './routes/api/profile'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
@@ -19,9 +22,24 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAdminRoute = ApiAdminRouteImport.update({
+  id: '/api/admin',
+  path: '/api/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCompaniesRoute = ApiCompaniesRouteImport.update({
+  id: '/api/companies',
+  path: '/api/companies',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiDrinksRoute = ApiDrinksRouteImport.update({
   id: '/api/drinks',
   path: '/api/drinks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGuestRoute = ApiGuestRouteImport.update({
+  id: '/api/guest',
+  path: '/api/guest',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiProfileRoute = ApiProfileRouteImport.update({
@@ -37,34 +55,68 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/admin': typeof ApiAdminRoute
+  '/api/companies': typeof ApiCompaniesRoute
   '/api/drinks': typeof ApiDrinksRoute
+  '/api/guest': typeof ApiGuestRoute
   '/api/profile': typeof ApiProfileRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/admin': typeof ApiAdminRoute
+  '/api/companies': typeof ApiCompaniesRoute
   '/api/drinks': typeof ApiDrinksRoute
+  '/api/guest': typeof ApiGuestRoute
   '/api/profile': typeof ApiProfileRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/admin': typeof ApiAdminRoute
+  '/api/companies': typeof ApiCompaniesRoute
   '/api/drinks': typeof ApiDrinksRoute
+  '/api/guest': typeof ApiGuestRoute
   '/api/profile': typeof ApiProfileRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/drinks' | '/api/profile' | '/api/auth/$'
+  fullPaths:
+    | '/'
+    | '/api/admin'
+    | '/api/companies'
+    | '/api/drinks'
+    | '/api/guest'
+    | '/api/profile'
+    | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/drinks' | '/api/profile' | '/api/auth/$'
-  id: '__root__' | '/' | '/api/drinks' | '/api/profile' | '/api/auth/$'
+  to:
+    | '/'
+    | '/api/admin'
+    | '/api/companies'
+    | '/api/drinks'
+    | '/api/guest'
+    | '/api/profile'
+    | '/api/auth/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/api/admin'
+    | '/api/companies'
+    | '/api/drinks'
+    | '/api/guest'
+    | '/api/profile'
+    | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiAdminRoute: typeof ApiAdminRoute
+  ApiCompaniesRoute: typeof ApiCompaniesRoute
   ApiDrinksRoute: typeof ApiDrinksRoute
+  ApiGuestRoute: typeof ApiGuestRoute
   ApiProfileRoute: typeof ApiProfileRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
@@ -78,11 +130,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/admin': {
+      id: '/api/admin'
+      path: '/api/admin'
+      fullPath: '/api/admin'
+      preLoaderRoute: typeof ApiAdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/companies': {
+      id: '/api/companies'
+      path: '/api/companies'
+      fullPath: '/api/companies'
+      preLoaderRoute: typeof ApiCompaniesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/drinks': {
       id: '/api/drinks'
       path: '/api/drinks'
       fullPath: '/api/drinks'
       preLoaderRoute: typeof ApiDrinksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/guest': {
+      id: '/api/guest'
+      path: '/api/guest'
+      fullPath: '/api/guest'
+      preLoaderRoute: typeof ApiGuestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/profile': {
@@ -104,7 +177,10 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiAdminRoute: ApiAdminRoute,
+  ApiCompaniesRoute: ApiCompaniesRoute,
   ApiDrinksRoute: ApiDrinksRoute,
+  ApiGuestRoute: ApiGuestRoute,
   ApiProfileRoute: ApiProfileRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }

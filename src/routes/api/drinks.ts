@@ -1,10 +1,10 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, gt } from 'drizzle-orm'
 import { createFileRoute } from '@tanstack/react-router'
 
 import { db } from '#/db'
 import { drinkDefault, drinkResponse, user } from '#/db/schema'
 import { auth } from '#/lib/auth'
-import { drinks, periods, type Drink, type DrinkChoice, type Period, type PollSource } from '#/lib/drinks'
+import { drinks, periods, type Drink, type DrinkChoice, type Period, type PollSource, type SugarChoice } from '#/lib/drinks'
 
 const indiaDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' })
 const todayKey = () => indiaDateFormatter.format(new Date())
@@ -25,20 +25,25 @@ function isDate(value: unknown): value is string {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
 }
 
-async function getSessionUser(request: Request) {
+async function getCurrentUser(request: Request) {
   const session = await auth.api.getSession({ headers: request.headers })
-  return session?.user ?? null
+  if (session?.user) return session.user
+  const token = request.headers.get('cookie')?.match(/(?:^|;\s*)brewbook_guest=([^;]+)/)?.[1]
+  if (!token) return null
+  const guest = await db.select({ id: user.id, name: user.name, email: user.email, image: user.image }).from(user).where(and(eq(user.guestToken, decodeURIComponent(token)), eq(user.isGuest, true), gt(user.guestExpiresAt, new Date()))).limit(1)
+  return guest[0] ?? null
 }
 
-function defaultsFromRows(rows: Array<{ period: Period; drink: Drink }>): DrinkChoice {
+function defaultsFromRows(rows: Array<{ period: Period; drink: Drink; sugar: boolean }>): { defaults: DrinkChoice; sugarDefaults: SugarChoice } {
   const defaults: DrinkChoice = { morning: 'No drink', evening: 'No drink' }
-  for (const row of rows) defaults[row.period] = row.drink
-  return defaults
+  const sugarDefaults: SugarChoice = { morning: true, evening: true }
+  for (const row of rows) { defaults[row.period] = row.drink; sugarDefaults[row.period] = row.sugar }
+  return { defaults, sugarDefaults }
 }
 
-async function readDay(userId: string, date: string) {
+export async function readDay(userId: string | undefined, date: string) {
   const [defaultRows, responseRows] = await Promise.all([
-    db.select({ period: drinkDefault.period, drink: drinkDefault.drink }).from(drinkDefault).where(eq(drinkDefault.userId, userId)),
+    userId ? db.select({ period: drinkDefault.period, drink: drinkDefault.drink, sugar: drinkDefault.sugar }).from(drinkDefault).where(eq(drinkDefault.userId, userId)) : Promise.resolve([]),
     db.select({
       userId: drinkResponse.userId,
       name: user.name,
@@ -46,29 +51,33 @@ async function readDay(userId: string, date: string) {
       image: user.image,
       period: drinkResponse.period,
       drink: drinkResponse.drink,
+      sugar: drinkResponse.sugar,
       source: drinkResponse.source,
     }).from(drinkResponse).innerJoin(user, eq(user.id, drinkResponse.userId)).where(eq(drinkResponse.date, date)),
   ])
 
-  const grouped = new Map<string, { user: { id: string; name: string; email: string; image: string | null }; choices: Partial<DrinkChoice>; sources: Partial<Record<Period, PollSource>> }>()
+  const grouped = new Map<string, { user: { id: string; name: string; email: string; image: string | null }; choices: Partial<DrinkChoice>; sugar: Partial<SugarChoice>; sources: Partial<Record<Period, PollSource>> }>()
   for (const row of responseRows) {
-    const existing = grouped.get(row.userId) ?? { user: { id: row.userId, name: row.name, email: row.email, image: row.image }, choices: {}, sources: {} }
+    const existing = grouped.get(row.userId) ?? { user: { id: row.userId, name: row.name, email: row.email, image: row.image }, choices: {}, sugar: {}, sources: {} }
     existing.choices[row.period] = row.drink
+    existing.sugar[row.period] = row.sugar
     existing.sources[row.period] = row.source
     grouped.set(row.userId, existing)
   }
 
-  return { defaults: defaultsFromRows(defaultRows), responses: [...grouped.values()].map((entry) => ({
+  const defaultSettings = defaultsFromRows(defaultRows)
+  return { ...defaultSettings, responses: [...grouped.values()].map((entry) => ({
     user: entry.user,
     choices: { morning: entry.choices.morning ?? 'No drink', evening: entry.choices.evening ?? 'No drink' },
+    sugar: { morning: entry.sugar.morning ?? true, evening: entry.sugar.evening ?? true },
     sources: { morning: entry.sources.morning ?? 'default', evening: entry.sources.evening ?? 'default' },
   })) }
 }
 
-async function ensureTodayResponse(userId: string, date: string, defaults: DrinkChoice) {
+async function ensureTodayResponse(userId: string, date: string, defaults: DrinkChoice, sugarDefaults: SugarChoice) {
   if (date !== todayKey()) return
   await db.insert(drinkResponse).values(periods.map((period) => ({
-    id: crypto.randomUUID(), userId, date, period, drink: defaults[period], source: 'default' as const,
+    id: crypto.randomUUID(), userId, date, period, drink: defaults[period], sugar: sugarDefaults[period], source: 'default' as const,
   }))).onConflictDoNothing({ target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period] })
 }
 
@@ -76,29 +85,33 @@ export const Route = createFileRoute('/api/drinks')({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const currentUser = await getSessionUser(request)
+        const currentUser = await getCurrentUser(request)
         if (!currentUser) return json({ error: 'Unauthorized' }, { status: 401 })
         const requestedDate = new URL(request.url).searchParams.get('date')
         if (!isDate(requestedDate)) return json({ error: 'A valid date is required' }, { status: 400 })
         const beforeEnsure = await readDay(currentUser.id, requestedDate)
-        await ensureTodayResponse(currentUser.id, requestedDate, beforeEnsure.defaults)
+        await ensureTodayResponse(currentUser.id, requestedDate, beforeEnsure.defaults, beforeEnsure.sugarDefaults)
         const day = requestedDate === todayKey() ? await readDay(currentUser.id, requestedDate) : beforeEnsure
         return json({ date: requestedDate, ...day })
       },
       PUT: async ({ request }) => {
-        const currentUser = await getSessionUser(request)
+        const currentUser = await getCurrentUser(request)
         if (!currentUser) return json({ error: 'Unauthorized' }, { status: 401 })
-        const body = await request.json() as { type?: unknown; date?: unknown; period?: unknown; drink?: unknown }
+        const body = await request.json() as { type?: unknown; date?: unknown; period?: unknown; drink?: unknown; sugar?: unknown }
         if (body.type === 'default') {
-          if (!isPeriod(body.period) || !isDrink(body.drink)) return json({ error: 'Invalid default' }, { status: 400 })
-          await db.insert(drinkDefault).values({ userId: currentUser.id, period: body.period, drink: body.drink }).onConflictDoUpdate({ target: [drinkDefault.userId, drinkDefault.period], set: { drink: body.drink, updatedAt: new Date() } })
-          const rows = await db.select({ period: drinkDefault.period, drink: drinkDefault.drink }).from(drinkDefault).where(eq(drinkDefault.userId, currentUser.id))
+          if (currentUser.email.endsWith('@guest.brewbook.local')) return json({ error: 'Guests cannot set defaults' }, { status: 403 })
+          if (!isPeriod(body.period) || !isDrink(body.drink) || typeof body.sugar !== 'boolean') return json({ error: 'Invalid default' }, { status: 400 })
+          const sugar = body.drink === 'No drink' ? true : body.sugar
+          await db.insert(drinkDefault).values({ userId: currentUser.id, period: body.period, drink: body.drink, sugar }).onConflictDoUpdate({ target: [drinkDefault.userId, drinkDefault.period], set: { drink: body.drink, sugar, updatedAt: new Date() } })
+          const rows = await db.select({ period: drinkDefault.period, drink: drinkDefault.drink, sugar: drinkDefault.sugar }).from(drinkDefault).where(eq(drinkDefault.userId, currentUser.id))
           return json(defaultsFromRows(rows))
         }
         if (body.type === 'response') {
-          if (!isDate(body.date) || !isPeriod(body.period) || !isDrink(body.drink)) return json({ error: 'Invalid response' }, { status: 400 })
+          if (!isDate(body.date) || !isPeriod(body.period) || !isDrink(body.drink) || typeof body.sugar !== 'boolean') return json({ error: 'Invalid response' }, { status: 400 })
+          if (currentUser.email.endsWith('@guest.brewbook.local') && body.date !== todayKey()) return json({ error: 'Guest responses are valid for today only' }, { status: 400 })
           const defaults = await readDay(currentUser.id, body.date)
-          await db.insert(drinkResponse).values({ id: crypto.randomUUID(), userId: currentUser.id, date: body.date, period: body.period, drink: body.drink, source: 'manual' }).onConflictDoUpdate({ target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period], set: { drink: body.drink, source: 'manual', updatedAt: new Date() } })
+          const sugar = body.drink === 'No drink' ? true : body.sugar
+          await db.insert(drinkResponse).values({ id: crypto.randomUUID(), userId: currentUser.id, date: body.date, period: body.period, drink: body.drink, sugar, source: 'manual' }).onConflictDoUpdate({ target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period], set: { drink: body.drink, sugar, source: 'manual', updatedAt: new Date() } })
           const day = await readDay(currentUser.id, body.date)
           return json({ date: body.date, ...day, defaults: defaults.defaults })
         }

@@ -135,6 +135,9 @@ The migrations create:
 - Better Auth tables: `user`, `session`, `account`, and `verification`.
 - `drink_default`: one default drink per user and period.
 - `drink_response`: one response per user, date, and period.
+- `company`: company name plus two email-ending columns used for automatic Google account matching.
+- `company_admin`: one row per company administrator email, allowing multiple administrators per company.
+- User roles and guest approval fields for `user`, `admin`, and `guest` access.
 - PostgreSQL enums for valid drinks, periods, and response sources.
 
 To create a new migration after changing `src/db/schema.ts`:
@@ -146,7 +149,33 @@ pnpm db:migrate
 
 Use `pnpm db:push` only for temporary local database iteration. Use generated migrations for shared or production databases.
 
-## 6. Run BrewBook locally
+## 6. Add companies and administrators
+
+`Mygate` is seeded by migration `0007`. Add another company by inserting its email endings, including the `@` prefix:
+
+```sql
+INSERT INTO company (id, name, email_ending_1, email_ending_2)
+VALUES ('acme', 'Acme', '@acme.com', '@acme.org');
+```
+
+Add one or more administrators for that company. Store emails in lowercase:
+
+```sql
+INSERT INTO company_admin (id, company_id, email)
+VALUES
+  ('mygate-admin-1', 'mygate', 'first.admin@mygate.in'),
+  ('mygate-admin-2', 'mygate', 'second.admin@mygate.com');
+```
+
+Administrators can approve guest requests and change today's drink choices for users in their company. To grant global admin access instead, set the signed-in user's role after they have logged in:
+
+```sql
+UPDATE "user" SET role = 'admin' WHERE lower(email) = lower('admin@example.com');
+```
+
+Guests are created with role `guest`, remain pending until a company administrator approves them, and receive access for 24 hours after approval.
+
+## 7. Run BrewBook locally
 
 ```bash
 pnpm dev
@@ -154,7 +183,7 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000). Sign in with a Google Workspace account, set defaults, and update a morning or evening response. The app should persist the changes in PostgreSQL and show them to other signed-in users.
 
-## 7. Deploy
+## 8. Deploy
 
 The repository includes a GitHub Actions plus Docker Compose deployment process modeled after `dev-utils`. See [DEPLOYMENT.md](./DEPLOYMENT.md) for the required GitHub secrets and VPS setup.
 
@@ -193,4 +222,4 @@ After deployment, add the production origin and callback URL to the Google OAuth
 
 `drink_response` stores the actual register entry. The unique key `(user_id, date, period)` makes updates idempotent. `source` is either `default` or `manual`, so the details view can show how each response was created.
 
-The API is implemented in `src/routes/api/drinks.ts`. All API reads and writes require a Better Auth session; the daily register is shared across authenticated users while defaults remain private to their owner.
+The API is implemented in `src/routes/api/drinks.ts`, `src/routes/api/guest.ts`, and `src/routes/api/admin.ts`. Daily member reads and writes require a Better Auth session; guests use an expiring cookie and can only access today's register after approval. Defaults remain private to their owner, and admin actions are scoped to the administrator's company unless the user has the global `admin` role.

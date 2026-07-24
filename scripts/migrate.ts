@@ -1,41 +1,25 @@
-import { Pool } from "pg";
 import path from "node:path";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-// import { loadDotenvx } from "../dotenvx";
+import { loadDotenvx } from "../dotenvx";
+import { Pool } from "pg";
+import { getPostgresConnectionConfig } from "../src/db/connection";
 
 // Ensure we are resolving paths relative to the project root
 const ROOT_DIR = process.cwd();
 
 // Load env variables, including dotenvx-encrypted values.
-// loadDotenvx();
+loadDotenvx();
 
-const dbUrl = process.env.DATABASE_URL;
-const databaseCaCert = process.env.DATABASE_CA_CERT;
-
-if (!dbUrl) {
-    throw new Error("Missing env variable DATABASE_URL!");
-}
-
-const pool = new Pool({
-    connectionString: dbUrl,
-    ssl: databaseCaCert
-        ? {
-              ca: databaseCaCert,
-              rejectUnauthorized: true,
-          }
-        : {
-              // Keep strict verification; NODE_EXTRA_CA_CERTS will provide the trusted CA in CI if needed
-              rejectUnauthorized: true,
-          },
-});
+const databaseConfig = getPostgresConnectionConfig();
+const pool = new Pool(databaseConfig);
 
 const db = drizzle(pool);
 
 async function runMigrations() {
     try {
         console.log("Connecting to the database to migrate...");
-        if (databaseCaCert) {
+        if (process.env.DATABASE_CA_CERT) {
             console.log("DATABASE_CA_CERT is provided inline.");
         }
         
