@@ -12,7 +12,7 @@ import {
 
 export const drinkPeriod = pgEnum('drink_period', ['morning', 'evening'])
 export const drinkChoice = pgEnum('drink_choice', ['Tea', 'Coffee', 'Green tea', 'Milk', 'Black Coffee', 'Black Tea', 'No drink'])
-export const drinkSource = pgEnum('drink_source', ['default', 'manual'])
+export const drinkSource = pgEnum('drink_source', ['default', 'manual', 'admin'])
 export const userRole = pgEnum('user_role', ['user', 'admin', 'guest'])
 export const guestStatus = pgEnum('guest_status', ['pending', 'approved', 'rejected'])
 

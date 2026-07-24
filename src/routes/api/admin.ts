@@ -61,9 +61,13 @@ export const Route = createFileRoute('/api/admin')({
           await db.update(user).set({ guestStatus: 'rejected', guestReviewedAt: new Date(), guestToken: null, guestExpiresAt: null }).where(and(eq(user.id, body.userId), eq(user.isGuest, true)))
           return json({ ok: true })
         }
+        if (body.type === 'removeGuest') {
+          await db.delete(user).where(and(eq(user.id, body.userId), eq(user.isGuest, true)))
+          return json({ ok: true })
+        }
         if (body.type === 'response' && isPeriod(body.period) && isDrink(body.drink) && typeof body.sugar === 'boolean') {
           const sugar = body.drink === 'No drink' ? true : body.sugar
-          await db.insert(drinkResponse).values({ id: crypto.randomUUID(), userId: body.userId, date: todayKey(), period: body.period, drink: body.drink, sugar, source: 'manual' }).onConflictDoUpdate({ target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period], set: { drink: body.drink, sugar, source: 'manual', updatedAt: new Date() } })
+          await db.insert(drinkResponse).values({ id: crypto.randomUUID(), userId: body.userId, date: todayKey(), period: body.period, drink: body.drink, sugar, source: 'admin' }).onConflictDoUpdate({ target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period], set: { drink: body.drink, sugar, source: 'admin', updatedAt: new Date() } })
           return json({ ok: true })
         }
         return json({ error: 'Invalid admin action' }, { status: 400 })

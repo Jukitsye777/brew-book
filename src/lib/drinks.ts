@@ -5,7 +5,7 @@ export type Drink = (typeof drinks)[number]
 export type Period = (typeof periods)[number]
 export type Company = string
 export type CompanyRecord = { id: string; name: string; emailEnding1: string; emailEnding2: string | null }
-export type PollSource = 'default' | 'manual'
+export type PollSource = 'default' | 'manual' | 'admin'
 export type DrinkChoice = Record<Period, Drink>
 export type SugarChoice = Record<Period, boolean>
 export type User = { id?: string; name: string; email: string; image?: string | null; role?: 'user' | 'admin' | 'guest' }
@@ -94,7 +94,7 @@ export function getAdminDashboard() {
   return request<AdminDashboard>('/api/admin')
 }
 
-export function updateGuestRequest(input: { type: 'approve' | 'reject'; userId: string }) {
+export function updateGuestRequest(input: { type: 'approve' | 'reject' | 'removeGuest'; userId: string }) {
   return request<{ ok: true }>('/api/admin', { method: 'POST', body: JSON.stringify(input) })
 }
 

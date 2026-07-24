@@ -57,6 +57,13 @@
       "when": 1784866629442,
       "tag": "0007_thick_glorian",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784879100197,
+      "tag": "0008_admin_drink_source",
+      "breakpoints": true
     }
   ]
 }
