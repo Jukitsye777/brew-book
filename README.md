@@ -19,6 +19,12 @@ Set these values in `.env.local`:
 - `BETTER_AUTH_URL`: the app's public base URL.
 - `GOOGLE_CLIENT_ID`: Google OAuth client ID.
 - `GOOGLE_CLIENT_SECRET`: Google OAuth client secret.
+- `SENTRY_DSN`: Sentry DSN for the Node runtime.
+- `SENTRY_ENVIRONMENT`: Sentry environment label for both runtimes.
+- `VITE_SENTRY_DSN`: Sentry DSN exposed to the browser bundle.
+- `SENTRY_ORG`: Sentry organization slug for source map uploads.
+- `SENTRY_PROJECT`: Sentry project slug for source map uploads.
+- `SENTRY_AUTH_TOKEN`: Sentry auth token used by the Vite plugin in CI.
 
 Add this callback URL to the Google OAuth client:
 
@@ -42,6 +48,8 @@ See [DB_SETUP.md](./DB_SETUP.md) for the complete DigitalOcean Managed PostgreSQ
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for the GitHub Actions, GHCR, DigitalOcean firewall, Docker, and VPS deployment process.
 
 Production configuration is encrypted with dotenvx. Local development uses `.env.local`; production uses the encrypted `.env.production` file and `DOTENV_PRIVATE_KEY_PRODUCTION`.
+
+Sentry is initialized in the browser app, the server runtime, and the Vite build. When `SENTRY_ORG`, `SENTRY_PROJECT`, and `SENTRY_AUTH_TOKEN` are present, production builds upload source maps to Sentry and delete the emitted `.map` files after upload. The runtime environment label comes from `SENTRY_ENVIRONMENT` and falls back to the current mode if it is unset.
 
 ## Commands
 
