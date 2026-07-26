@@ -168,6 +168,12 @@ function reportSentryError(reason: unknown, fallbackMessage: string) {
 	captureSentryException(reason);
 	return reason instanceof Error ? reason.message : fallbackMessage;
 }
+function authErrorMessage() {
+	if (typeof window === "undefined") return null;
+	const error = new URLSearchParams(window.location.search).get("error");
+	if (!error) return null;
+	return error;
+}
 function AppErrorFallback() {
 	return (
 		<main className="grid min-h-svh place-items-center bg-[#f6f5f1] px-5 text-[#33271f]">
@@ -212,6 +218,7 @@ function App() {
 	const todaysSugar = todayPoll?.sugar ?? state.sugarDefaults;
 	const todayPolls = state.entries[todayKey] ?? [];
 	const isGuest = Boolean(guestSession);
+	const signInError = authErrorMessage();
 	useEffect(() => {
 		syncSentryUser(
 			state.user
@@ -627,6 +634,8 @@ function App() {
 	}
 
 	if (authPending || guestPending) return <AuthLoading />;
+	if (signInError && !session?.user && !localUser && !guestSession)
+		return <AccessDeniedPage authError />;
 	if (!session?.user && !localUser && !guestSession)
 		return guestSetup ? (
 			<GuestSetupPage
@@ -1220,7 +1229,7 @@ function SignInPage({
 	signIn,
 	onGuest,
 	onLocalSignUp,
-}: {
+	}: {
 	signIn: () => void;
 	onGuest: () => void;
 	onLocalSignUp?: () => void;
@@ -1280,21 +1289,31 @@ function SignInPage({
 	);
 }
 
-function AccessDeniedPage({ onSignOut }: { onSignOut: () => void }) {
+function AccessDeniedPage({ authError = false, onSignOut }: { authError?: boolean; onSignOut?: () => void }) {
 	return (
 		<main className="grid min-h-svh place-items-center bg-[#f6f5f1] px-5 text-[#33271f]">
 			<section className="w-full max-w-sm rounded-3xl bg-[#fffdf9] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
 				<h1 className="font-serif text-3xl">Work email not recognized</h1>
 				<p className="mt-3 text-sm leading-6 text-[#887f74]">
-					Ask your company admin to add your email domain to BrewBook.
+					Use an email from a registered company, or request guest access from a
+					company administrator.
 				</p>
-				<button
-					onClick={onSignOut}
-					type="button"
-					className="mt-7 min-h-11 rounded-xl bg-[#5a3c26] px-5 text-sm font-semibold text-white"
-				>
-					Sign out
-				</button>
+				{authError ? (
+					<a
+					href="/"
+					className="mt-7 inline-flex min-h-11 items-center rounded-xl bg-[#5a3c26] px-5 text-sm font-semibold text-white"
+					>
+						Back to BrewBook
+					</a>
+				) : (
+					<button
+						onClick={onSignOut}
+						type="button"
+						className="mt-7 min-h-11 rounded-xl bg-[#5a3c26] px-5 text-sm font-semibold text-white"
+					>
+						Sign out
+					</button>
+				)}
 			</section>
 		</main>
 	);

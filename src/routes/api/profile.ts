@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { createFileRoute } from '@tanstack/react-router'
 
 import { db } from '#/db'
@@ -17,6 +17,11 @@ function isCompany(value: unknown): value is Company {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+function readGuestToken(request: Request) {
+  const token = request.headers.get('cookie')?.match(/(?:^|;\s*)brewbook_guest=([^;]+)/)?.[1]
+  return token ? decodeURIComponent(token) : null
+}
+
 function isDrink(value: unknown): value is Drink {
   return typeof value === 'string' && drinks.includes(value as Drink)
 }
@@ -33,6 +38,54 @@ async function getCurrentUser(request: Request) {
   return session?.user ?? null
 }
 
+/**
+ * A guest can start a response before signing in. If they then authenticate in
+ * the same browser, the guest cookie is proof that both identities belong to
+ * the same person. Move those responses to the authenticated user before the
+ * normal day/profile reads happen, so details never show both identities.
+ */
+async function claimGuestResponses(request: Request, currentUser: { id: string; email: string }) {
+  const token = readGuestToken(request)
+  if (!token) return
+
+  const guestRows = await db
+    .select({ id: user.id, companyId: user.companyId })
+    .from(user)
+    .where(and(eq(user.guestToken, token), eq(user.isGuest, true)))
+    .limit(1)
+  const guest = guestRows[0]
+  if (!guest || guest.id === currentUser.id) return
+
+  const companyRows = await db
+    .select({ id: company.id, emailEnding1: company.emailEnding1, emailEnding2: company.emailEnding2 })
+    .from(company)
+  const email = currentUser.email.trim().toLowerCase()
+  const matchedCompany = companyRows.find((item) =>
+    [item.emailEnding1, item.emailEnding2].some((ending) =>
+      ending && email.endsWith(ending.trim().toLowerCase()),
+    ),
+  )
+  if (!matchedCompany || guest.companyId !== matchedCompany.id) return
+
+  await db.transaction(async (tx) => {
+    const guestResponses = await tx
+      .select()
+      .from(drinkResponse)
+      .where(eq(drinkResponse.userId, guest.id))
+
+    for (const response of guestResponses) {
+      await tx
+        .insert(drinkResponse)
+        .values({ ...response, userId: currentUser.id })
+        .onConflictDoNothing({
+          target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period],
+        })
+    }
+
+    await tx.delete(user).where(eq(user.id, guest.id))
+  })
+}
+
 async function readProfile(currentUser: { id: string; email: string }) {
   const [userRow, defaultRows, companyRows, adminRows] = await Promise.all([
     db.select({ companyId: user.companyId, legacyCompany: user.company, role: user.role }).from(user).where(eq(user.id, currentUser.id)).limit(1),
@@ -40,7 +93,8 @@ async function readProfile(currentUser: { id: string; email: string }) {
     db.select({ id: company.id, name: company.name, emailEnding1: company.emailEnding1, emailEnding2: company.emailEnding2 }).from(company),
     db.select({ email: companyAdmin.email }).from(companyAdmin).where(sql`lower(${companyAdmin.email}) = lower(${currentUser.email})`),
   ])
-  const matchedCompany = companyRows.find((item) => [item.emailEnding1, item.emailEnding2].some((ending) => ending && currentUser.email.toLowerCase().endsWith(ending.toLowerCase())))
+  const email = currentUser.email.trim().toLowerCase()
+  const matchedCompany = companyRows.find((item) => [item.emailEnding1, item.emailEnding2].some((ending) => ending && email.endsWith(ending.trim().toLowerCase())))
   const companyName = matchedCompany?.name ?? null
   const accessDenied = !matchedCompany
   const isAdmin = userRow[0]?.role === 'admin' || adminRows.length > 0
@@ -56,11 +110,13 @@ export const Route = createFileRoute('/api/profile')({
       GET: async ({ request }) => {
         const currentUser = await getCurrentUser(request)
         if (!currentUser) return json({ error: 'Unauthorized' }, { status: 401 })
+        await claimGuestResponses(request, currentUser)
         return json(await readProfile(currentUser))
       },
       PUT: async ({ request }) => {
         const currentUser = await getCurrentUser(request)
         if (!currentUser) return json({ error: 'Unauthorized' }, { status: 401 })
+        await claimGuestResponses(request, currentUser)
         const body = await request.json() as { company?: unknown; defaults?: Partial<Record<'morning' | 'evening', unknown>>; sugarDefaults?: Partial<Record<'morning' | 'evening', unknown>> }
         const profile = await readProfile(currentUser)
         const companyName = profile.company

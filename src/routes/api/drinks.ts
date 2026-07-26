@@ -27,7 +27,11 @@ function isDate(value: unknown): value is string {
 
 async function getCurrentUser(request: Request) {
   const session = await auth.api.getSession({ headers: request.headers })
-  if (session?.user) return session.user
+  if (session?.user) {
+    const member = await db.select({ companyId: user.companyId }).from(user).where(eq(user.id, session.user.id)).limit(1)
+    if (member[0]?.companyId) return session.user
+    return null
+  }
   const token = request.headers.get('cookie')?.match(/(?:^|;\s*)brewbook_guest=([^;]+)/)?.[1]
   if (!token) return null
   const guest = await db.select({ id: user.id, name: user.name, email: user.email, image: user.image }).from(user).where(and(eq(user.guestToken, decodeURIComponent(token)), eq(user.isGuest, true), gt(user.guestExpiresAt, new Date()))).limit(1)
@@ -42,9 +46,12 @@ function defaultsFromRows(rows: Array<{ period: Period; drink: Drink; sugar: boo
 }
 
 export async function readDay(userId: string | undefined, date: string) {
-  const [defaultRows, responseRows] = await Promise.all([
+  const [defaultRows, currentUserRows] = await Promise.all([
     userId ? db.select({ period: drinkDefault.period, drink: drinkDefault.drink, sugar: drinkDefault.sugar }).from(drinkDefault).where(eq(drinkDefault.userId, userId)) : Promise.resolve([]),
-    db.select({
+    userId ? db.select({ companyId: user.companyId }).from(user).where(eq(user.id, userId)).limit(1) : Promise.resolve([]),
+  ])
+  const companyId = currentUserRows[0]?.companyId
+  const responseRows = await db.select({
       userId: drinkResponse.userId,
       name: user.name,
       email: user.email,
@@ -53,8 +60,9 @@ export async function readDay(userId: string | undefined, date: string) {
       drink: drinkResponse.drink,
       sugar: drinkResponse.sugar,
       source: drinkResponse.source,
-    }).from(drinkResponse).innerJoin(user, eq(user.id, drinkResponse.userId)).where(eq(drinkResponse.date, date)),
-  ])
+    }).from(drinkResponse).innerJoin(user, eq(user.id, drinkResponse.userId)).where(
+      companyId ? and(eq(drinkResponse.date, date), eq(user.companyId, companyId)) : eq(drinkResponse.date, date),
+    )
 
   const grouped = new Map<string, { user: { id: string; name: string; email: string; image: string | null }; choices: Partial<DrinkChoice>; sugar: Partial<SugarChoice>; sources: Partial<Record<Period, PollSource>> }>()
   for (const row of responseRows) {
