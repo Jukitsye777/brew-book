@@ -135,6 +135,20 @@ function sourceLabel(source: PollSource) {
 			? "Manual"
 			: "Default";
 }
+function MetaTag({ children, muted = false }: { children: React.ReactNode; muted?: boolean }) {
+	return (
+		<span
+			className={cx(
+				"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-4",
+				muted
+					? "border-[#e6e0d6] bg-[#fffdf9] text-[#887f74]"
+					: "border-[#dbc9b6] bg-[#f6ece1] text-[#68452e]",
+			)}
+		>
+			{children}
+		</span>
+	);
+}
 function isTransientFetchError(reason: unknown) {
 	return (
 		reason instanceof TypeError &&
@@ -180,7 +194,7 @@ function AppErrorFallback() {
 			<section className="w-full max-w-sm rounded-3xl bg-[#fffdf9] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
 				<h1 className="font-serif text-3xl">Something went wrong</h1>
 				<p className="mt-3 text-sm leading-6 text-[#887f74]">
-					BrewBook hit an unexpected error. Refresh the page or try again in a
+					MyBev hit an unexpected error. Refresh the page or try again in a
 					moment.
 				</p>
 			</section>
@@ -464,10 +478,13 @@ function App() {
 	}, [guestSession, openPoll, sessionUserId, state.entries]);
 	useEffect(() => {
 		if (!openPoll) return;
-		const previousOverflow = document.body.style.overflow;
-		document.body.style.overflow = "hidden";
+		const scrollY = window.scrollY;
+		document.body.style.top = `-${scrollY}px`;
+		document.body.classList.add("modal-open");
 		return () => {
-			document.body.style.overflow = previousOverflow;
+			document.body.classList.remove("modal-open");
+			document.body.style.top = "";
+			window.scrollTo(0, scrollY);
 		};
 	}, [openPoll]);
 
@@ -687,11 +704,11 @@ function App() {
 			>
 				<header className="border-b border-[#e6e0d6] bg-[#fffdf9]">
 					<div className="mx-auto flex max-w-[1180px] items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8">
-						<div className="flex items-center gap-2.5">
-							<BrandMark />
-							<span className="font-serif text-xl font-semibold tracking-[-0.02em]">
-								BrewBook
-							</span>
+					<div className="flex items-center gap-2.5">
+						<BrandMark />
+						<span className="font-serif text-xl font-semibold tracking-[-0.02em]">
+							MyBev
+						</span>
 						</div>
 						<div className="relative">
 							<button
@@ -1109,9 +1126,7 @@ function AdminPeriodControl({
 				<h3 className="text-xs font-semibold text-[#887f74]">
 					{period === "morning" ? "Morning" : "Evening"}
 				</h3>
-				<span className="shrink-0 text-[11px] font-semibold text-[#9a9084]">
-					{sourceLabel(source)}
-				</span>
+				<MetaTag muted>{sourceLabel(source)}</MetaTag>
 			</div>
 			<select
 				className="mt-2 h-10 w-full rounded-lg border border-[#e6e0d6] bg-[#fffdf9] px-2 text-sm font-semibold text-[#68452e]"
@@ -1255,7 +1270,7 @@ function SignInPage({
 					iconColor="#5a3c26"
 					iconSize={30}
 				/>
-				<h1 className="mt-7 font-serif text-5xl leading-tight">BrewBook</h1>
+				<h1 className="mt-7 font-serif text-5xl leading-tight">MyBev</h1>
 				<p className="mt-4 max-w-xs text-[15px] leading-6 text-[#e7d8c4]">
 					Use your work email to continue.
 				</p>
@@ -1303,7 +1318,7 @@ function AccessDeniedPage({ authError = false, onSignOut }: { authError?: boolea
 					href="/"
 					className="mt-7 inline-flex min-h-11 items-center rounded-xl bg-[#5a3c26] px-5 text-sm font-semibold text-white"
 					>
-						Back to BrewBook
+						Back to MyBev
 					</a>
 				) : (
 					<button
@@ -1627,10 +1642,9 @@ function HistoryResponseCards({ polls }: { polls: PollRecord[] }) {
 											</p>
 										</div>
 									</div>
-									<span className="shrink-0 text-right text-xs text-[#887f74]">
-										{entry.sugar ? "Sugar" : "No sugar"}
-										<br />
-										{sourceLabel(entry.source)}
+									<span className="flex shrink-0 flex-wrap justify-end gap-1">
+										<MetaTag>{entry.sugar ? "Sugar" : "No sugar"}</MetaTag>
+										<MetaTag muted>{sourceLabel(entry.source)}</MetaTag>
 									</span>
 								</div>
 							))}
@@ -1924,14 +1938,14 @@ function PollDetailsSheet({
 			? polls
 			: polls.filter((item) => item.sources[period] === sourceFilter);
 	return (
-		<div className="fixed inset-0 z-30 flex items-end overflow-hidden p-0 sm:items-center sm:justify-center sm:p-4">
+		<div className="fixed inset-0 z-30 flex items-end overscroll-none bg-[#2d2925]/10 p-0 sm:items-center sm:justify-center sm:p-4">
 			<button
-				className="absolute inset-0 cursor-default bg-[#2d2925]/30"
+				className="absolute inset-0 cursor-default bg-[#2d2925]/30 [touch-action:none]"
 				onClick={onClose}
 				type="button"
 				aria-label="Close poll details"
 			/>
-			<section className="relative z-10 flex max-h-[88svh] w-full flex-col rounded-t-3xl bg-[#fffdf9] px-4 pb-6 pt-3 shadow-2xl sm:max-w-lg sm:rounded-2xl sm:p-6">
+			<section className="relative z-10 flex max-h-[88svh] min-h-0 w-full flex-col rounded-t-3xl bg-[#fffdf9] px-4 pb-6 pt-3 shadow-2xl overscroll-contain sm:max-w-lg sm:rounded-2xl sm:p-6">
 				<div className="mx-auto mb-4 h-1 w-10 shrink-0 rounded-full bg-[#ddd3c7] sm:hidden" />
 				<div className="shrink-0 border-b border-[#eee8df] pb-4">
 					<div className="flex items-start justify-between">
@@ -1974,7 +1988,7 @@ function PollDetailsSheet({
 						))}
 					</div>
 				</div>
-				<div className="mt-5 grid gap-5 overflow-y-auto pr-1">
+				<div className="mt-5 min-h-0 flex-1 grid gap-5 overflow-y-auto overscroll-contain pr-1 [touch-action:pan-y]">
 					{drinks.map((drink) => {
 						const drinkPolls = filteredPolls.filter(
 							(item) => item.choices[period] === drink,
@@ -2006,10 +2020,9 @@ function PollDetailsSheet({
 													{compactName(item.user)}
 												</span>
 											</div>
-											<span className="shrink-0 text-right text-xs text-[#887f74]">
-												{item.sugar[period] ? "Sugar" : "No sugar"}
-												<br />
-												{sourceLabel(item.sources[period])}
+											<span className="flex shrink-0 flex-wrap justify-end gap-1">
+												<MetaTag>{item.sugar[period] ? "Sugar" : "No sugar"}</MetaTag>
+												<MetaTag muted>{sourceLabel(item.sources[period])}</MetaTag>
 											</span>
 										</div>
 									))}

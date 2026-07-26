@@ -24,7 +24,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'BrewBook',
+        title: 'MyBev',
       },
     ],
     links: [
@@ -51,9 +51,9 @@ function NotFoundPage() {
           <span className="font-serif text-2xl">404</span>
         </div>
         <h1 className="mt-6 font-serif text-3xl">Page not found</h1>
-        <p className="mt-2 text-sm leading-6 text-[#887f74]">This BrewBook page does not exist.</p>
+        <p className="mt-2 text-sm leading-6 text-[#887f74]">This MyBev page does not exist.</p>
         <Link className="mt-7 inline-flex min-h-11 items-center rounded-xl bg-[#5a3c26] px-4 text-sm font-semibold text-white transition hover:bg-[#68452e]" to="/">
-          Back to BrewBook
+          Back to MyBev
         </Link>
       </section>
     </main>
