@@ -2613,6 +2613,9 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 	const rafRef = useRef<number>(0);
 	const simWidthRef = useRef(3.0);
 	const simHeightRef = useRef(4.0);
+	// Ref so rAF loop always reads latest tilt without stale closure
+	const tiltRef = useRef(tilt);
+	useEffect(() => { tiltRef.current = tilt; }, [tilt]);
 
 	// Init / teardown fluid sim
 	useEffect(() => {
@@ -2640,10 +2643,7 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 			const r = rendererRef.current;
 			if (!f || !r) return;
 
-			// gamma = left/right tilt (-45..45), map to X gravity
-			// beta = forward tilt; upright ~90, tilted forward ~0-45
-			// Y gravity: invert (sim Y is up), so gravity pulls down = negative Y
-			const gx = (tilt.gamma / 45) * 9.81;
+			const gx = (tiltRef.current.gamma / 45) * 9.81;
 			const gy = -9.81;
 
 			f.simulate(dt, gx, gy, 0.95, 50, 2, 1.7, true, true, 1.0);
