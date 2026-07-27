@@ -56,7 +56,7 @@ async function run() {
     if (!subscriber || !sub.pushSubscription) continue
 
     const drink = defaultsByUser.get(sub.id) ?? 'Tea'
-    const message = getGreeting(subscriber.name, drink, null, dateKey)
+    const message = getGreeting(subscriber.name, drink, null)
 
     const periodLabel = period === 'morning' ? 'Morning' : 'Evening'
 
