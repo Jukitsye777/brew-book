@@ -1708,6 +1708,12 @@ function SignInPage({
 	onGuest: () => void;
 	onLocalSignUp?: () => void;
 }) {
+	useEffect(() => {
+		const html = document.documentElement;
+		const wasDark = html.classList.contains("dark");
+		html.classList.remove("dark");
+		return () => { if (wasDark) html.classList.add("dark"); };
+	}, []);
 	return (
 		<main className="relative grid min-h-svh place-items-center overflow-hidden bg-[var(--c-page)] px-5 py-10 text-[var(--c-cream)]">
 			<div
