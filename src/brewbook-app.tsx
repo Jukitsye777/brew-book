@@ -56,6 +56,7 @@ import {
 	initSentryClient,
 	syncSentryUser,
 } from "#/lib/sentry";
+import { Bell, BellOff } from "lucide-react";
 
 type AppState = {
 	user: User | null;
@@ -187,6 +188,10 @@ const sourceFilters: Array<PollSource | "all"> = [
 ];
 
 initSentryClient();
+
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+	void navigator.serviceWorker.register('/sw.js')
+}
 
 function useTheme() {
 	const [dark, setDark] = useState(() => {
@@ -338,6 +343,103 @@ function AppErrorFallback() {
 			</section>
 		</main>
 	);
+}
+
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined
+
+function urlBase64ToUint8Array(base64String: string) {
+	const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+	const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+	const raw = atob(base64)
+	return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)))
+}
+
+function usePushNotifications(userId: string | undefined) {
+	const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(() => {
+		if (typeof Notification === 'undefined') return 'unsupported'
+		return Notification.permission
+	})
+	const [dismissed, setDismissed] = useState(() => localStorage.getItem('push-dismissed') === '1')
+
+	async function subscribe() {
+		if (!VAPID_PUBLIC_KEY || !userId) return
+		try {
+			const reg = await navigator.serviceWorker.ready
+			const sub = await reg.pushManager.subscribe({
+				userVisibleOnly: true,
+				applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+			})
+			setPermission('granted')
+			await fetch('/api/push', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ subscription: sub }),
+			})
+		} catch {
+			setPermission(Notification.permission)
+		}
+	}
+
+	async function unsubscribe() {
+		try {
+			const reg = await navigator.serviceWorker.ready
+			const sub = await reg.pushManager.getSubscription()
+			if (sub) await sub.unsubscribe()
+			await fetch('/api/push', { method: 'DELETE' })
+			setPermission('default')
+		} catch {
+			// ignore
+		}
+	}
+
+	function dismiss() {
+		localStorage.setItem('push-dismissed', '1')
+		setDismissed(true)
+	}
+
+	const showBanner =
+		VAPID_PUBLIC_KEY &&
+		permission !== 'unsupported' &&
+		permission !== 'granted' &&
+		permission !== 'denied' &&
+		!dismissed
+
+	return { permission, showBanner: Boolean(showBanner), subscribe, unsubscribe, dismiss }
+}
+
+function PushBanner({ onEnable, onDismiss }: { onEnable: () => void; onDismiss: () => void }) {
+	return (
+		<div className="mx-auto mt-4 max-w-[1180px] px-4 sm:px-6 lg:px-8">
+			<div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--c-border)] bg-[var(--c-card)] px-4 py-3 shadow-sm">
+				<div className="flex items-center gap-3">
+					<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[var(--c-brand-bg)] text-[var(--c-brand)]">
+						<Bell size={17} />
+					</span>
+					<div>
+						<p className="text-sm font-semibold text-[var(--c-text-dark)]">Get drink reminders</p>
+						<p className="text-xs text-[var(--c-text-muted)]">We'll nudge you at morning and evening rounds ☕</p>
+					</div>
+				</div>
+				<div className="flex shrink-0 items-center gap-2">
+					<button
+						onClick={onDismiss}
+						type="button"
+						className="grid size-8 place-items-center rounded-lg text-[var(--c-text-muted)] transition hover:bg-[var(--c-hover)]"
+						aria-label="Dismiss"
+					>
+						<XIcon size={16} />
+					</button>
+					<button
+						onClick={onEnable}
+						type="button"
+						className="min-h-9 rounded-lg bg-[var(--c-brand)] px-3 text-xs font-semibold text-white transition hover:opacity-90"
+					>
+						Enable
+					</button>
+				</div>
+			</div>
+		</div>
+	)
 }
 
 function App() {
@@ -879,6 +981,7 @@ function App() {
 			);
 	}
 
+	const push = usePushNotifications(sessionUserId)
 	const [leaveLoading, setLeaveLoading] = useState(false);
 	function toggleLeave() {
 		if (!state.user || leaveLoading) return;
@@ -977,6 +1080,12 @@ function App() {
 						</button>
 					</div>
 				</header>
+				{push.showBanner && !isGuest && (
+					<PushBanner
+						onEnable={() => void push.subscribe()}
+						onDismiss={push.dismiss}
+					/>
+				)}
 				{error && (
 					<div className="mx-auto mt-4 max-w-[1180px] px-4 sm:px-6 lg:px-8">
 						<div
