@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray } from 'drizzle-orm'
+import { and, eq, gt, inArray, ne } from 'drizzle-orm'
 import { createFileRoute } from '@tanstack/react-router'
 
 import { db } from '#/db'
@@ -61,7 +61,7 @@ export async function readDay(userId: string | undefined, date: string) {
       sugar: drinkResponse.sugar,
       source: drinkResponse.source,
     }).from(drinkResponse).innerJoin(user, eq(user.id, drinkResponse.userId)).where(
-      companyId ? and(eq(drinkResponse.date, date), eq(user.companyId, companyId)) : eq(drinkResponse.date, date),
+      companyId ? and(eq(drinkResponse.date, date), eq(user.companyId, companyId), ne(user.isOnLeave, true)) : and(eq(drinkResponse.date, date), ne(user.isOnLeave, true)),
     )
 
   const grouped = new Map<string, { user: { id: string; name: string; email: string; image: string | null }; choices: Partial<DrinkChoice>; sugar: Partial<SugarChoice>; sources: Partial<Record<Period, PollSource>> }>()
@@ -85,8 +85,8 @@ export async function readDay(userId: string | undefined, date: string) {
 export async function ensureTodayResponses(companyId: string, date: string) {
   if (date !== todayKey()) return
 
-  const members = await db.select({ id: user.id, isGuest: user.isGuest, guestStatus: user.guestStatus }).from(user).where(eq(user.companyId, companyId))
-  const eligibleMembers = members.filter((member) => !member.isGuest || member.guestStatus === 'approved')
+  const members = await db.select({ id: user.id, isGuest: user.isGuest, guestStatus: user.guestStatus, isOnLeave: user.isOnLeave }).from(user).where(eq(user.companyId, companyId))
+  const eligibleMembers = members.filter((member) => !member.isOnLeave && (!member.isGuest || member.guestStatus === 'approved'))
   if (!eligibleMembers.length) return
 
   const memberIds = eligibleMembers.map((member) => member.id)

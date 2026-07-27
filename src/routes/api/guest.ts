@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, gt } from 'drizzle-orm'
 import { createFileRoute } from '@tanstack/react-router'
 
 import { db } from '#/db'
@@ -24,7 +24,7 @@ function guestCookie(token: string, maxAge: number) {
 async function getGuest(request: Request) {
   const token = request.headers.get('cookie')?.match(/(?:^|;\s*)brewbook_guest=([^;]+)/)?.[1]
   if (!token) return null
-  const rows = await db.select({ id: user.id, name: user.name, email: user.email, image: user.image, status: user.guestStatus }).from(user).where(and(eq(user.guestToken, decodeURIComponent(token)), eq(user.isGuest, true))).limit(1)
+  const rows = await db.select({ id: user.id, name: user.name, email: user.email, image: user.image, status: user.guestStatus }).from(user).where(and(eq(user.guestToken, decodeURIComponent(token)), eq(user.isGuest, true), gt(user.guestExpiresAt, new Date()))).limit(1)
   return rows[0] ?? null
 }
 

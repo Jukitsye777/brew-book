@@ -15,6 +15,7 @@ import { Route as ApiCompaniesRouteImport } from './routes/api/companies'
 import { Route as ApiDrinksRouteImport } from './routes/api/drinks'
 import { Route as ApiGuestRouteImport } from './routes/api/guest'
 import { Route as ApiProfileRouteImport } from './routes/api/profile'
+import { Route as ApiStatsRouteImport } from './routes/api/stats'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -47,6 +48,11 @@ const ApiProfileRoute = ApiProfileRouteImport.update({
   path: '/api/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiStatsRoute = ApiStatsRouteImport.update({
+  id: '/api/stats',
+  path: '/api/stats',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -60,6 +66,7 @@ export interface FileRoutesByFullPath {
   '/api/drinks': typeof ApiDrinksRoute
   '/api/guest': typeof ApiGuestRoute
   '/api/profile': typeof ApiProfileRoute
+  '/api/stats': typeof ApiStatsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
@@ -69,6 +76,7 @@ export interface FileRoutesByTo {
   '/api/drinks': typeof ApiDrinksRoute
   '/api/guest': typeof ApiGuestRoute
   '/api/profile': typeof ApiProfileRoute
+  '/api/stats': typeof ApiStatsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
@@ -79,6 +87,7 @@ export interface FileRoutesById {
   '/api/drinks': typeof ApiDrinksRoute
   '/api/guest': typeof ApiGuestRoute
   '/api/profile': typeof ApiProfileRoute
+  '/api/stats': typeof ApiStatsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
@@ -90,6 +99,7 @@ export interface FileRouteTypes {
     | '/api/drinks'
     | '/api/guest'
     | '/api/profile'
+    | '/api/stats'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -99,6 +109,7 @@ export interface FileRouteTypes {
     | '/api/drinks'
     | '/api/guest'
     | '/api/profile'
+    | '/api/stats'
     | '/api/auth/$'
   id:
     | '__root__'
@@ -108,6 +119,7 @@ export interface FileRouteTypes {
     | '/api/drinks'
     | '/api/guest'
     | '/api/profile'
+    | '/api/stats'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
@@ -118,6 +130,7 @@ export interface RootRouteChildren {
   ApiDrinksRoute: typeof ApiDrinksRoute
   ApiGuestRoute: typeof ApiGuestRoute
   ApiProfileRoute: typeof ApiProfileRoute
+  ApiStatsRoute: typeof ApiStatsRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
@@ -165,6 +178,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/stats': {
+      id: '/api/stats'
+      path: '/api/stats'
+      fullPath: '/api/stats'
+      preLoaderRoute: typeof ApiStatsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -182,6 +202,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiDrinksRoute: ApiDrinksRoute,
   ApiGuestRoute: ApiGuestRoute,
   ApiProfileRoute: ApiProfileRoute,
+  ApiStatsRoute: ApiStatsRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport
