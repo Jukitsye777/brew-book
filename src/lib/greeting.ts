@@ -3,17 +3,8 @@ import type { Weather, WeatherCondition } from './weather'
 
 type Pool = string[]
 
-// Simple hash so the same user sees the same message all day (not a new one every 4s poll refresh)
-function dailyIndex(seed: string, length: number): number {
-  let hash = 0
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
-  }
-  return hash % length
-}
-
-function pick(pool: Pool, seed: string): string {
-  return pool[dailyIndex(seed, pool.length)]
+function pick(pool: Pool): string {
+  return pool[Math.floor(Math.random() * pool.length)]
 }
 
 function inject(template: string, name: string): string {
@@ -152,21 +143,17 @@ function poolForDrink(drink: Drink): Pool {
   return teaCoffee
 }
 
-export function getGreeting(name: string, drink: Drink, weather: Weather | null, date: string): string {
+export function getGreeting(name: string, drink: Drink, weather: Weather | null): string {
   const firstName = name.trim().split(/\s+/)[0]
-  const seed = `${date}-${firstName}-${drink}`
 
-  // 40% chance of a weather message when condition is notable (not unknown)
+  // 40% chance of a weather message when condition is notable
   if (weather && weather.condition !== 'unknown') {
     const pool = weatherMessages[weather.condition]
-    // Use a different seed offset for the weather decision so it doesn't always win/lose
-    const weatherSeed = `${seed}-weather`
-    const weatherChance = dailyIndex(weatherSeed, 10)
-    if (pool.length > 0 && weatherChance < 4) {
-      return inject(pick(pool, weatherSeed), firstName)
+    if (pool.length > 0 && Math.random() < 0.4) {
+      return inject(pick(pool), firstName)
     }
   }
 
   const pool = poolForDrink(drink)
-  return inject(pick(pool, seed), firstName)
+  return inject(pick(pool), firstName)
 }
