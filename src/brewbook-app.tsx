@@ -457,6 +457,10 @@ function App() {
 				cancelled = true;
 			};
 		}
+		// Replace history so OAuth redirect URL is removed — prevents back-button returning to login
+		if (window.location.search || window.location.pathname !== "/") {
+			window.history.replaceState(null, "", "/");
+		}
 		const user = {
 			id: sessionUserId,
 			name: sessionUserName,
@@ -2623,12 +2627,10 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 		if (!canvas || permission !== "granted") return;
 
 		const dpr = window.devicePixelRatio || 1;
-		const rect = canvas.getBoundingClientRect();
-		canvas.width = rect.width * dpr;
-		canvas.height = rect.height * dpr;
-		const aspect = canvas.height / canvas.width;
-		simWidthRef.current = 3.0;
-		simHeightRef.current = 3.0 * aspect;
+		canvas.width = 260 * dpr;
+		canvas.height = 380 * dpr;
+		simWidthRef.current = 2.6;
+		simHeightRef.current = 3.8;
 
 		const color = hexToRgb(drinkColors[activeDrink] ?? "#a36f43");
 		const foam = { r: Math.min(1, color.r + 0.35), g: Math.min(1, color.g + 0.25), b: Math.min(1, color.b + 0.2) };
@@ -2699,8 +2701,24 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 		);
 	}
 
+	const drinkHex = drinkColors[activeDrink] ?? "#a36f43";
+
 	return (
 		<div className="fixed inset-0 z-50 flex flex-col bg-[var(--c-page)]">
+			{/* SVG defs for metaball filter */}
+			<svg width="0" height="0" className="absolute">
+				<defs>
+					<filter id="fluid-metaball" x="-20%" y="-20%" width="140%" height="140%" colorInterpolationFilters="sRGB">
+						<feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur" />
+						<feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 28 -10" result="blob" />
+					</filter>
+					<clipPath id="glass-clip" clipPathUnits="objectBoundingBox">
+						{/* trapezoid: top wider, bottom narrower — glass shape */}
+						<polygon points="0.08,0 0.92,0 0.82,1 0.18,1" />
+					</clipPath>
+				</defs>
+			</svg>
+
 			{/* Header */}
 			<div className="flex items-center justify-between border-b border-[var(--c-border)] px-5 py-4">
 				<span className="font-serif text-lg font-bold text-[var(--c-brand)]">Glass Simulator</span>
@@ -2709,12 +2727,48 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 				</button>
 			</div>
 
-			{/* Fluid canvas */}
-			<div className="relative flex-1 overflow-hidden">
-				<canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-				<p className="absolute bottom-4 left-0 right-0 text-center text-xs text-[var(--c-text-dim)]">
-					Tilt to move the fluid
-				</p>
+			{/* Glass area */}
+			<div className="flex flex-1 flex-col items-center justify-center gap-4 px-8">
+				<p className="text-sm font-semibold text-[var(--c-text-mid)]">{activeDrink}</p>
+
+				{/* Glass wrapper: fixed proportions, glass clip + metaball */}
+				<div className="relative" style={{ width: 260, height: 380 }}>
+					{/* Glass border SVG overlay */}
+					<svg
+						viewBox="0 0 260 380"
+						width="260" height="380"
+						className="absolute inset-0 z-20 pointer-events-none"
+					>
+						{/* Glass outline */}
+						<polygon
+							points="20,0 240,0 214,380 46,380"
+							fill="none"
+							stroke="var(--c-border-3)"
+							strokeWidth="3"
+							strokeLinejoin="round"
+						/>
+						{/* Highlight */}
+						<line x1="48" y1="12" x2="58" y2="345" stroke="white" strokeWidth="4" strokeLinecap="round" opacity="0.18" />
+						<line x1="66" y1="5" x2="72" y2="70" stroke="white" strokeWidth="2.5" strokeLinecap="round" opacity="0.14" />
+					</svg>
+
+					{/* Canvas inside glass with metaball filter + clip */}
+					<div
+						className="absolute inset-0 overflow-hidden"
+						style={{
+							clipPath: "polygon(8% 0%, 92% 0%, 82% 100%, 18% 100%)",
+						}}
+					>
+						<div style={{ filter: "url(#fluid-metaball)", width: "100%", height: "100%", background: "transparent" }}>
+							<canvas
+								ref={canvasRef}
+								style={{ width: "100%", height: "100%", display: "block", background: "transparent" }}
+							/>
+						</div>
+					</div>
+				</div>
+
+				<p className="text-xs text-[var(--c-text-dim)]">Tilt to swirl</p>
 			</div>
 
 			{/* Drink picker */}
@@ -2726,11 +2780,10 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 							key={d}
 							type="button"
 							onClick={() => setActiveDrink(d)}
+							style={activeDrink === d ? { background: drinkHex, borderColor: drinkHex, color: "white" } : undefined}
 							className={cx(
 								"rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-								activeDrink === d
-									? "border-[var(--c-brand)] bg-[var(--c-brand)] text-white"
-									: "border-[var(--c-border)] text-[var(--c-text-muted)] hover:bg-[var(--c-muted)]",
+								activeDrink !== d && "border-[var(--c-border)] text-[var(--c-text-muted)] hover:bg-[var(--c-muted)]",
 							)}
 						>
 							{d}
