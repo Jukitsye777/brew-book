@@ -32,6 +32,7 @@ export const user = pgTable('user', {
   company: text('company'),
   companyId: text('company_id').references(() => company.id, { onDelete: 'set null' }),
   role: userRole('role').notNull().default('user'),
+  isOnLeave: boolean('is_on_leave').notNull().default(false),
   isGuest: boolean('is_guest').notNull().default(false),
   guestToken: text('guest_token').unique(),
   guestExpiresAt: timestamp('guest_expires_at', { withTimezone: true }),

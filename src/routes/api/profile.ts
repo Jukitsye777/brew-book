@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, gt, sql } from 'drizzle-orm'
 import { createFileRoute } from '@tanstack/react-router'
 
 import { db } from '#/db'
@@ -51,7 +51,7 @@ async function claimGuestResponses(request: Request, currentUser: { id: string; 
   const guestRows = await db
     .select({ id: user.id, companyId: user.companyId })
     .from(user)
-    .where(and(eq(user.guestToken, token), eq(user.isGuest, true)))
+    .where(and(eq(user.guestToken, token), eq(user.isGuest, true), eq(user.guestStatus, 'approved'), gt(user.guestExpiresAt, new Date())))
     .limit(1)
   const guest = guestRows[0]
   if (!guest || guest.id === currentUser.id) return
@@ -88,7 +88,7 @@ async function claimGuestResponses(request: Request, currentUser: { id: string; 
 
 async function readProfile(currentUser: { id: string; email: string }) {
   const [userRow, defaultRows, companyRows, adminRows] = await Promise.all([
-    db.select({ companyId: user.companyId, legacyCompany: user.company, role: user.role }).from(user).where(eq(user.id, currentUser.id)).limit(1),
+    db.select({ companyId: user.companyId, legacyCompany: user.company, role: user.role, isOnLeave: user.isOnLeave }).from(user).where(eq(user.id, currentUser.id)).limit(1),
     db.select({ period: drinkDefault.period, drink: drinkDefault.drink, sugar: drinkDefault.sugar }).from(drinkDefault).where(eq(drinkDefault.userId, currentUser.id)),
     db.select({ id: company.id, name: company.name, emailEnding1: company.emailEnding1, emailEnding2: company.emailEnding2 }).from(company),
     db.select({ email: companyAdmin.email }).from(companyAdmin).where(sql`lower(${companyAdmin.email}) = lower(${currentUser.email})`),
@@ -101,7 +101,7 @@ async function readProfile(currentUser: { id: string; email: string }) {
   if (matchedCompany && (userRow[0]?.companyId !== matchedCompany.id || userRow[0]?.legacyCompany !== matchedCompany.name)) {
     await db.update(user).set({ company: matchedCompany.name, companyId: matchedCompany.id, updatedAt: new Date() }).where(eq(user.id, currentUser.id))
   }
-  return { company: companyName, requiresCompany: false, accessDenied, needsOnboarding: !accessDenied && defaultRows.length < periods.length, role: isAdmin ? 'admin' as const : 'user' as const, ...defaultsFromRows(defaultRows) }
+  return { company: companyName, requiresCompany: false, accessDenied, needsOnboarding: !accessDenied && defaultRows.length < periods.length, role: isAdmin ? 'admin' as const : 'user' as const, isOnLeave: userRow[0]?.isOnLeave ?? false, ...defaultsFromRows(defaultRows) }
 }
 
 export const Route = createFileRoute('/api/profile')({
@@ -136,6 +136,14 @@ export const Route = createFileRoute('/api/profile')({
           }
         })
         return json(await readProfile(currentUser))
+      },
+      PATCH: async ({ request }) => {
+        const currentUser = await getCurrentUser(request)
+        if (!currentUser) return json({ error: 'Unauthorized' }, { status: 401 })
+        const body = await request.json() as { isOnLeave?: unknown }
+        if (typeof body.isOnLeave !== 'boolean') return json({ error: 'isOnLeave must be boolean' }, { status: 400 })
+        await db.update(user).set({ isOnLeave: body.isOnLeave, updatedAt: new Date() }).where(eq(user.id, currentUser.id))
+        return json({ isOnLeave: body.isOnLeave })
       },
     },
   },

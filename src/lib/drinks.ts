@@ -8,7 +8,7 @@ export type CompanyRecord = { id: string; name: string; emailEnding1: string; em
 export type PollSource = 'default' | 'manual' | 'admin'
 export type DrinkChoice = Record<Period, Drink>
 export type SugarChoice = Record<Period, boolean>
-export type User = { id?: string; name: string; email: string; image?: string | null; role?: 'user' | 'admin' | 'guest' }
+export type User = { id?: string; name: string; email: string; image?: string | null; role?: 'user' | 'admin' | 'guest'; isOnLeave?: boolean }
 export type PollRecord = {
   user: User
   choices: DrinkChoice
@@ -29,6 +29,14 @@ export type Profile = {
   sugarDefaults: SugarChoice
   role: 'user' | 'admin' | 'guest'
   accessDenied: boolean
+  isOnLeave: boolean
+}
+
+export function setLeaveStatus(isOnLeave: boolean) {
+  return request<{ isOnLeave: boolean }>('/api/profile', {
+    method: 'PATCH',
+    body: JSON.stringify({ isOnLeave }),
+  })
 }
 export type GuestSession = { user: User; date: string; status: 'pending' | 'approved' | 'rejected'; defaults: DrinkChoice; sugarDefaults: SugarChoice; responses: PollRecord[] }
 export type AdminDashboard = { date: string; pendingGuests: Array<{ id: string; name: string; company: string | null; requestedAt: string | null }>; responses: PollRecord[] }
@@ -88,6 +96,10 @@ export function createGuest(input: { name: string; company: Company }) {
 
 export function leaveGuest() {
   return request<{ ok: true }>('/api/guest', { method: 'DELETE' })
+}
+
+export function getStats(days = 30) {
+  return request<import('#/routes/api/stats').StatsResponse>(`/api/stats?days=${days}`)
 }
 
 export function getAdminDashboard() {

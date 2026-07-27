@@ -2,16 +2,20 @@ import { ErrorBoundary } from "@sentry/react";
 import {
 	ArrowLeft,
 	ArrowRight,
+	BarChart2,
 	CalendarDays,
 	Check,
 	ChevronRight,
 	Coffee,
 	Eye,
-	History,
+	Info,
+	Loader2,
 	LogOut,
+	Moon,
 	ShieldCheck,
-	SlidersHorizontal,
-	X,
+	Sun,
+	User as UserIcon,
+	X as XIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -31,6 +35,8 @@ import {
 	getDrinkDay,
 	getGuestSession,
 	getProfile,
+	getStats,
+	setLeaveStatus,
 	leaveGuest,
 	type Period,
 	type PollRecord,
@@ -55,7 +61,7 @@ type AppState = {
 	sugarDefaults: SugarChoice;
 	entries: Record<string, PollRecord[]>;
 };
-type View = "today" | "history" | "defaults" | "admin";
+type View = "today" | "stats" | "profile" | "admin";
 type OpenPoll = { date: string; period: Period } | null;
 type OnboardingState = {
 	company: Company | "";
@@ -68,6 +74,92 @@ const periodDetails: Array<{ id: Period; label: string; helper: string }> = [
 	{ id: "morning", label: "Morning", helper: "Before the first prep round" },
 	{ id: "evening", label: "Evening", helper: "For the afternoon round" },
 ];
+type DrinkInfo = {
+	tagline: string;
+	nutrition: Array<{ label: string; value: string }>;
+	pros: string[];
+	cons: string[];
+};
+const drinkInfo: Partial<Record<Drink, DrinkInfo>> = {
+	Tea: {
+		tagline: "Classic comfort in every sip",
+		nutrition: [
+			{ label: "Calories", value: "2 kcal" },
+			{ label: "Caffeine", value: "20–50 mg" },
+			{ label: "Antioxidants", value: "High" },
+			{ label: "Sugar (plain)", value: "0 g" },
+		],
+		pros: ["Rich in antioxidants", "Mild caffeine boost", "Supports hydration", "May improve focus"],
+		cons: ["Tannins can reduce iron absorption", "Can stain teeth", "May cause jitteriness in excess"],
+	},
+	Coffee: {
+		tagline: "Your daily fuel",
+		nutrition: [
+			{ label: "Calories", value: "5 kcal" },
+			{ label: "Caffeine", value: "80–100 mg" },
+			{ label: "Antioxidants", value: "Very High" },
+			{ label: "Sugar (plain)", value: "0 g" },
+		],
+		pros: ["Strong alertness boost", "Rich in antioxidants", "May improve metabolism", "Linked to reduced diabetes risk"],
+		cons: ["Can cause anxiety or jitters", "May disrupt sleep", "Acidic, can irritate stomach", "Habit-forming"],
+	},
+	"Green tea": {
+		tagline: "Calm energy, ancient wisdom",
+		nutrition: [
+			{ label: "Calories", value: "0 kcal" },
+			{ label: "Caffeine", value: "15–30 mg" },
+			{ label: "L-theanine", value: "High" },
+			{ label: "Antioxidants", value: "Very High" },
+		],
+		pros: ["L-theanine promotes calm focus", "Powerful antioxidant EGCG", "Supports metabolism", "Gentle on stomach"],
+		cons: ["Lower caffeine than coffee", "Can taste bitter if over-steeped", "May interfere with iron absorption"],
+	},
+	Milk: {
+		tagline: "Strong bones, warm soul",
+		nutrition: [
+			{ label: "Calories", value: "61 kcal" },
+			{ label: "Protein", value: "3.2 g" },
+			{ label: "Calcium", value: "113 mg" },
+			{ label: "Fat", value: "3.3 g" },
+		],
+		pros: ["Excellent source of calcium", "Complete protein", "Supports bone health", "Filling and nourishing"],
+		cons: ["Higher calorie than other drinks", "Lactose intolerant? Skip it", "Full-fat adds saturated fat"],
+	},
+	"Black Coffee": {
+		tagline: "Pure. Bold. Unapologetic.",
+		nutrition: [
+			{ label: "Calories", value: "2 kcal" },
+			{ label: "Caffeine", value: "80–100 mg" },
+			{ label: "Fat", value: "0 g" },
+			{ label: "Sugar", value: "0 g" },
+		],
+		pros: ["Zero calories", "Maximum caffeine hit", "Sharpens mental clarity", "Rich in antioxidants"],
+		cons: ["Very acidic", "Can cause heartburn", "May raise blood pressure", "Bitter taste not for everyone"],
+	},
+	"Black Tea": {
+		tagline: "Bold, robust, timeless",
+		nutrition: [
+			{ label: "Calories", value: "2 kcal" },
+			{ label: "Caffeine", value: "40–70 mg" },
+			{ label: "Antioxidants", value: "High" },
+			{ label: "Sugar (plain)", value: "0 g" },
+		],
+		pros: ["Higher caffeine than green tea", "Good gut health support", "Heart-healthy antioxidants", "Rich robust flavour"],
+		cons: ["Tannins reduce iron absorption", "Can stain teeth", "May cause acid reflux"],
+	},
+	"No drink": {
+		tagline: "Staying hydrated is a choice too",
+		nutrition: [
+			{ label: "Calories", value: "0 kcal" },
+			{ label: "Caffeine", value: "0 mg" },
+			{ label: "Sugar", value: "0 g" },
+			{ label: "Hydration", value: "Water instead?" },
+		],
+		pros: ["No caffeine dependency", "Zero calories", "Easy on the stomach"],
+		cons: ["Might miss out on antioxidants", "No caffeine boost for focus"],
+	},
+};
+
 const dateFormatter = new Intl.DateTimeFormat("en-CA", {
 	timeZone: "Asia/Kolkata",
 });
@@ -94,16 +186,60 @@ const sourceFilters: Array<PollSource | "all"> = [
 
 initSentryClient();
 
-function dateKeyOffset(offset: number) {
-	const date = new Date();
-	date.setDate(date.getDate() - offset);
-	return dateFormatter.format(date);
+function useTheme() {
+	const [dark, setDark] = useState(() => {
+		if (typeof window === "undefined") return false;
+		const saved = localStorage.getItem("theme");
+		if (saved) return saved === "dark";
+		return window.matchMedia("(prefers-color-scheme: dark)").matches;
+	});
+	useEffect(() => {
+		document.documentElement.classList.toggle("dark", dark);
+		localStorage.setItem("theme", dark ? "dark" : "light");
+	}, [dark]);
+	return { dark, toggle: () => setDark((d) => !d) };
 }
-function shiftDateKey(dateKey: string, offset: number) {
-	const date = new Date(`${dateKey}T12:00:00`);
-	date.setDate(date.getDate() + offset);
-	return dateFormatter.format(date);
+
+
+
+function useGyroscope() {
+	const [tilt, setTilt] = useState({ gamma: 0, beta: 0 });
+	const [permission, setPermission] = useState<"unknown" | "granted" | "denied">("unknown");
+
+	useEffect(() => {
+		// Check if permission API exists (iOS 13+)
+		const needsPermission = typeof (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission === "function";
+		if (!needsPermission) {
+			setPermission("granted");
+		}
+	}, []);
+
+	useEffect(() => {
+		if (permission !== "granted") return;
+		function handler(e: DeviceOrientationEvent) {
+			setTilt({
+				gamma: Math.max(-45, Math.min(45, e.gamma ?? 0)),
+				beta: Math.max(-90, Math.min(90, e.beta ?? 0)),
+			});
+		}
+		window.addEventListener("deviceorientation", handler, true);
+		return () => window.removeEventListener("deviceorientation", handler, true);
+	}, [permission]);
+
+	async function requestPermission() {
+		const api = (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission;
+		if (api) {
+			const result = await api();
+			setPermission(result === "granted" ? "granted" : "denied");
+		} else {
+			setPermission("granted");
+		}
+	}
+
+	return { tilt, permission, requestPermission };
 }
+
+
 function displayDate(dateKey: string) {
 	return displayDateFormatter.format(new Date(`${dateKey}T12:00:00`));
 }
@@ -141,8 +277,8 @@ function MetaTag({ children, muted = false }: { children: React.ReactNode; muted
 			className={cx(
 				"inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-4",
 				muted
-					? "border-[#e6e0d6] bg-[#fffdf9] text-[#887f74]"
-					: "border-[#dbc9b6] bg-[#f6ece1] text-[#68452e]",
+					? "border-[var(--c-border)] bg-[var(--c-card)] text-[var(--c-text-muted)]"
+					: "border-[var(--c-border-3)] bg-[var(--c-accent-bg)] text-[var(--c-text-mid)]",
 			)}
 		>
 			{children}
@@ -190,10 +326,10 @@ function authErrorMessage() {
 }
 function AppErrorFallback() {
 	return (
-		<main className="grid min-h-svh place-items-center bg-[#f6f5f1] px-5 text-[#33271f]">
-			<section className="w-full max-w-sm rounded-3xl bg-[#fffdf9] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
+		<main className="grid min-h-svh place-items-center bg-[var(--c-page)] px-5 text-[var(--c-text-dark)]">
+			<section className="w-full max-w-sm rounded-3xl bg-[var(--c-card)] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
 				<h1 className="font-serif text-3xl">Something went wrong</h1>
-				<p className="mt-3 text-sm leading-6 text-[#887f74]">
+				<p className="mt-3 text-sm leading-6 text-[var(--c-text-muted)]">
 					MyBev hit an unexpected error. Refresh the page or try again in a
 					moment.
 				</p>
@@ -203,11 +339,21 @@ function AppErrorFallback() {
 }
 
 function App() {
+	const { dark, toggle: toggleTheme } = useTheme();
 	const [state, setState] = useState<AppState>(readState);
 	const [view, setView] = useState<View>("today");
-	const [historyDate, setHistoryDate] = useState(dateKeyOffset(1));
+	const [historyDate, setHistoryDate] = useState(todayKey);
+	const [historyLoading, setHistoryLoading] = useState(false);
 	const [openPoll, setOpenPoll] = useState<OpenPoll>(null);
-	const [profileOpen, setProfileOpen] = useState(false);
+	const [eggOpen, setEggOpen] = useState(false);
+	const [, setEggTaps] = useState(0);
+	function tapLogo() {
+		setEggTaps((n) => {
+			const next = n + 1;
+			if (next >= 5) { setEggOpen(true); return 0; }
+			return next;
+		});
+	}
 	const [error, setError] = useState<string | null>(null);
 	const [profileReady, setProfileReady] = useState(false);
 	const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
@@ -323,7 +469,7 @@ function App() {
 					if (cancelled) return;
 					setState((current) => ({
 						...current,
-						user: { ...user, role: profile.role },
+						user: { ...user, role: profile.role, isOnLeave: profile.isOnLeave },
 						defaults: profile.defaults,
 						sugarDefaults: profile.sugarDefaults,
 					}));
@@ -342,7 +488,7 @@ function App() {
 						if (cancelled) return;
 						setState((current) => ({
 							...current,
-							user: { ...user, role: profile.role },
+							user: { ...user, role: profile.role, isOnLeave: profile.isOnLeave },
 							defaults: day.defaults,
 							sugarDefaults: day.sugarDefaults,
 							entries: { ...current.entries, [todayKey]: day.responses },
@@ -431,8 +577,9 @@ function App() {
 		};
 	}, [state.user?.role, view]);
 	useEffect(() => {
-		if ((!sessionUserId && !guestSession) || view !== "history") return;
+		if (!sessionUserId && !guestSession) return;
 		let cancelled = false;
+		setHistoryLoading(true);
 		void getDrinkDay(historyDate)
 			.then((day) => {
 				if (cancelled) return;
@@ -447,11 +594,14 @@ function App() {
 			.catch((reason: unknown) => {
 				if (!cancelled)
 					setError(reportSentryError(reason, "Unable to load history"));
+			})
+			.finally(() => {
+				if (!cancelled) setHistoryLoading(false);
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [guestSession, historyDate, sessionUserId, view]);
+	}, [guestSession, historyDate, sessionUserId]);
 	useEffect(() => {
 		if (
 			(!sessionUserId && !guestSession) ||
@@ -489,7 +639,9 @@ function App() {
 	}, [openPoll]);
 
 	function signIn() {
-		void authClient.signIn.social({ provider: "google", callbackURL: "/" });
+		authClient.signIn.social({ provider: "google", callbackURL: "/" }).catch((reason: unknown) => {
+			setError(reason instanceof Error ? reason.message : "Sign-in failed. Check your network and try again.");
+		});
 	}
 	function signOut() {
 		if (guestSession) void leaveGuest();
@@ -650,7 +802,26 @@ function App() {
 			);
 	}
 
-	if (authPending || guestPending) return <AuthLoading />;
+	const [leaveLoading, setLeaveLoading] = useState(false);
+	function toggleLeave() {
+		if (!state.user || leaveLoading) return;
+		const next = !state.user.isOnLeave;
+		setState((current) => ({
+			...current,
+			user: current.user ? { ...current.user, isOnLeave: next } : null,
+		}));
+		setLeaveLoading(true);
+		void setLeaveStatus(next)
+			.catch(() => {
+				setState((current) => ({
+					...current,
+					user: current.user ? { ...current.user, isOnLeave: !next } : null,
+				}));
+			})
+			.finally(() => setLeaveLoading(false));
+	}
+
+	if (authPending || guestPending) return <AuthLoading message={pickRandom(brewingMessages)} />;
 	if (signInError && !session?.user && !localUser && !guestSession)
 		return <AccessDeniedPage authError />;
 	if (!session?.user && !localUser && !guestSession)
@@ -674,8 +845,8 @@ function App() {
 			/>
 		);
 	if (localComplete) return <LocalSetupComplete onReset={signOut} />;
-	if (!state.user) return <AuthLoading />;
-	if (!profileReady) return <AuthLoading message="Loading your workspace..." />;
+	if (!state.user) return <AuthLoading message={pickRandom(brewingMessages)} />;
+	if (!profileReady) return <AuthLoading message={pickRandom(brewingMessages)} />;
 	if (accessDenied) return <AccessDeniedPage onSignOut={signOut} />;
 	if (guestSession?.status === "pending")
 		return <GuestPendingPage onExit={signOut} />;
@@ -691,60 +862,38 @@ function App() {
 				error={error}
 			/>
 		);
-	const visiblePolls =
-		view === "history" ? (state.entries[historyDate] ?? []) : todayPolls;
+	const historyPolls = state.entries[historyDate] ?? [];
 	const openPollData = openPoll ? (state.entries[openPoll.date] ?? []) : [];
 	return (
 		<ErrorBoundary fallback={AppErrorFallback}>
 			<main
 				className={cx(
-					"min-h-svh bg-[#f6f5f1] text-[#2d2925] lg:pb-0",
+					"min-h-svh bg-[var(--c-page)] pt-[57px] text-[var(--c-text)] lg:pb-0",
 					!isGuest && "pb-20",
 				)}
 			>
-				<header className="border-b border-[#e6e0d6] bg-[#fffdf9]">
+				<header className="fixed inset-x-0 top-0 z-10 border-b border-[var(--c-border)] bg-[var(--c-card)]/95 backdrop-blur">
 					<div className="mx-auto flex max-w-[1180px] items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8">
-					<div className="flex items-center gap-2.5">
+					<button type="button" onClick={tapLogo} className="flex items-center gap-2.5" aria-label="MyBev logo">
 						<BrandMark />
 						<span className="font-serif text-xl font-semibold tracking-[-0.02em]">
 							MyBev
 						</span>
-						</div>
-						<div className="relative">
-							<button
-								className="grid size-9 place-items-center rounded-full bg-[#dfc5a5] text-xs font-semibold text-[#5a3c26] transition hover:ring-2 hover:ring-[#a36f43]/40"
-								onClick={() => setProfileOpen((open) => !open)}
-								type="button"
-								aria-label="Open profile"
-								aria-expanded={profileOpen}
-							>
-								{initials(state.user.name)}
-							</button>
-							{profileOpen && (
-								<div className="absolute right-0 top-11 z-20 w-64 rounded-2xl border border-[#e6e0d6] bg-[#fffdf9] p-4 shadow-xl">
-									<p className="text-sm font-semibold text-[#33271f]">
-										{state.user.name}
-									</p>
-									<p className="mt-1 break-words text-xs text-[#887f74]">
-										{isGuest ? "Guest access" : state.user.email}
-									</p>
-									<button
-										className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#5a3c26] text-sm font-semibold text-white transition hover:bg-[#68452e]"
-										onClick={signOut}
-										type="button"
-									>
-										<LogOut size={16} />
-										Logout
-									</button>
-								</div>
-							)}
-						</div>
+					</button>
+						<button
+							onClick={() => setView("profile")}
+							type="button"
+							aria-label="Open profile"
+							className="text-sm font-semibold text-[var(--c-text-mid)] transition hover:text-[var(--c-brand)]"
+						>
+							Hi, {state.user.name.split(" ")[0]}
+						</button>
 					</div>
 				</header>
 				{error && (
 					<div className="mx-auto mt-4 max-w-[1180px] px-4 sm:px-6 lg:px-8">
 						<div
-							className="rounded-xl border border-[#e7cfc3] bg-[#fff5f0] px-3 py-2 text-sm text-[#8b4d35]"
+							className="rounded-xl border border-[var(--c-border-err)] bg-[var(--c-err-bg)] px-3 py-2 text-sm text-[var(--c-text-err)]"
 							role="alert"
 						>
 							{error}
@@ -776,20 +925,28 @@ function App() {
 								updateEntry={updateEntry}
 								updateSugar={updateSugar}
 								onOpen={(period) => setOpenPoll({ date: todayKey, period })}
+								isOnLeave={state.user.isOnLeave ?? false}
+								onToggleLeave={toggleLeave}
+								leaveLoading={leaveLoading}
 							/>
 						)}
-						{view === "history" && (
-							<HistoryView
-								date={historyDate}
-								setDate={setHistoryDate}
-								polls={visiblePolls}
-							/>
+						{view === "stats" && !isGuest && (
+							<StatsView />
 						)}
-						{view === "defaults" && (
-							<DefaultsView
+						{view === "profile" && (
+							<ProfileView
+								user={state.user}
 								defaults={state.defaults}
 								sugarDefaults={state.sugarDefaults}
 								updateDefault={updateDefault}
+								onSignOut={signOut}
+								isGuest={isGuest}
+								dark={dark}
+								onToggleTheme={toggleTheme}
+								historyDate={historyDate}
+								setHistoryDate={setHistoryDate}
+								historyPolls={historyPolls}
+								historyLoading={historyLoading}
 							/>
 						)}
 						{view === "admin" && (
@@ -801,14 +958,16 @@ function App() {
 					</section>
 				</div>
 				{!isGuest && (
-					<div className="fixed inset-x-0 bottom-0 z-20 border-t border-[#e6e0d6] bg-[#fffdf9]/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5 backdrop-blur sm:px-4 lg:hidden">
+					<div className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--c-border)] bg-[var(--c-card)]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:px-4 lg:hidden">
 						<Nav
 							admin={state.user.role === "admin"}
 							view={view}
 							setView={setView}
+							mobile
 						/>
 					</div>
 				)}
+				{eggOpen && <GlassEasterEgg onClose={() => setEggOpen(false)} />}
 				{openPoll && (
 					<PollDetailsSheet
 						date={openPoll.date}
@@ -845,14 +1004,14 @@ function GuestSetupPage({
 		else onBack();
 	};
 	return (
-		<main className="grid min-h-svh place-items-center bg-[#f6f5f1] px-5 py-10 text-[#33271f]">
-			<section className="w-full max-w-sm rounded-3xl bg-[#fffdf9] p-6 shadow-[0_20px_60px_rgba(77,57,38,0.1)] sm:p-8">
+		<main className="grid min-h-svh place-items-center bg-[var(--c-page)] px-5 py-10 text-[var(--c-text-dark)]">
+			<section className="w-full max-w-sm rounded-3xl bg-[var(--c-card)] p-6 shadow-[0_20px_60px_rgba(77,57,38,0.1)] sm:p-8">
 				<h1 className="font-serif text-3xl">
 					{step === "name" ? "What is your name?" : "Choose your company"}
 				</h1>
 				{error && (
 					<p
-						className="mt-4 rounded-xl border border-[#e7cfc3] bg-[#fff5f0] px-3 py-2 text-sm text-[#8b4d35]"
+						className="mt-4 rounded-xl border border-[var(--c-border-err)] bg-[var(--c-err-bg)] px-3 py-2 text-sm text-[var(--c-text-err)]"
 						role="alert"
 					>
 						{error}
@@ -860,10 +1019,10 @@ function GuestSetupPage({
 				)}
 				{step === "name" ? (
 					<>
-						<label className="mt-7 block text-sm font-semibold text-[#33271f]">
+						<label className="mt-7 block text-sm font-semibold text-[var(--c-text-dark)]">
 							Name
 							<input
-								className="mt-2 h-12 w-full rounded-xl border border-[#e6e0d6] bg-[#fffdf9] px-3 text-sm outline-none transition focus:border-[#a36f43]"
+								className="mt-2 h-12 w-full rounded-xl border border-[var(--c-border)] bg-[var(--c-card)] px-3 text-sm outline-none transition focus:border-[var(--c-brand-lt)]"
 								onChange={(event) => setName(event.target.value)}
 								placeholder="Your name"
 								value={name}
@@ -873,7 +1032,7 @@ function GuestSetupPage({
 							<button
 								onClick={back}
 								type="button"
-								className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-[#e6e0d6] px-3 text-sm font-semibold text-[#68452e]"
+								className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-[var(--c-border)] px-3 text-sm font-semibold text-[var(--c-text-mid)]"
 							>
 								<ArrowLeft size={16} />
 								Back
@@ -882,7 +1041,7 @@ function GuestSetupPage({
 								disabled={name.trim().length < 2}
 								onClick={() => setStep("company")}
 								type="button"
-								className="flex min-h-11 flex-[1.5] items-center justify-center gap-2 rounded-xl bg-[#5a3c26] px-3 text-sm font-semibold text-white transition hover:bg-[#68452e] disabled:cursor-not-allowed disabled:opacity-45"
+								className="flex min-h-11 flex-[1.5] items-center justify-center gap-2 rounded-xl bg-[var(--c-brand)] px-3 text-sm font-semibold text-white transition hover:bg-[var(--c-text-mid)] disabled:cursor-not-allowed disabled:opacity-45"
 							>
 								Next
 								<ArrowRight size={16} />
@@ -900,8 +1059,8 @@ function GuestSetupPage({
 									className={cx(
 										"flex min-h-12 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition",
 										company === item.name
-											? "border-[#a36f43] bg-[#f6ece1] text-[#68452e]"
-											: "border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]",
+											? "border-[var(--c-brand-lt)] bg-[var(--c-accent-bg)] text-[var(--c-text-mid)]"
+											: "border-[var(--c-border-2)] text-[var(--c-text-soft)] hover:border-[var(--c-border-3)]",
 									)}
 								>
 									{item.name}
@@ -913,7 +1072,7 @@ function GuestSetupPage({
 							<button
 								onClick={back}
 								type="button"
-								className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-[#e6e0d6] px-3 text-sm font-semibold text-[#68452e]"
+								className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-[var(--c-border)] px-3 text-sm font-semibold text-[var(--c-text-mid)]"
 							>
 								<ArrowLeft size={16} />
 								Back
@@ -922,7 +1081,7 @@ function GuestSetupPage({
 								disabled={!company}
 								onClick={() => onSubmit(name.trim(), company)}
 								type="button"
-								className="min-h-11 flex-[1.5] rounded-xl bg-[#5a3c26] px-3 text-sm font-semibold text-white transition hover:bg-[#68452e] disabled:cursor-not-allowed disabled:opacity-45"
+								className="min-h-11 flex-[1.5] rounded-xl bg-[var(--c-brand)] px-3 text-sm font-semibold text-white transition hover:bg-[var(--c-text-mid)] disabled:cursor-not-allowed disabled:opacity-45"
 							>
 								Request access
 							</button>
@@ -941,7 +1100,7 @@ function AdminView({
 	onRefresh: () => void;
 }) {
 	const [openUserId, setOpenUserId] = useState<string | null>(null);
-	if (!data) return <AuthLoading message="Loading admin view..." />;
+	if (!data) return <AuthLoading message={pickRandom(brewingMessages)} />;
 	return (
 		<div className="grid gap-5">
 			<PageHeader
@@ -954,19 +1113,19 @@ function AdminView({
 				}
 			/>
 			{data.pendingGuests.length > 0 && (
-				<section className="rounded-2xl border border-[#e6e0d6] bg-[#fffdf9] p-4">
-					<h2 className="text-sm font-semibold text-[#33271f]">
+				<section className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] p-4">
+					<h2 className="text-sm font-semibold text-[var(--c-text-dark)]">
 						Guest requests
 					</h2>
 					<div className="mt-3 grid gap-2">
 						{data.pendingGuests.map((guest) => (
 							<div
-								className="flex items-center justify-between gap-3 rounded-xl bg-[#f8f5f0] px-3 py-3"
+								className="flex items-center justify-between gap-3 rounded-xl bg-[var(--c-row)] px-3 py-3"
 								key={guest.id}
 							>
 								<div className="min-w-0">
 									<p className="truncate text-sm font-semibold">{guest.name}</p>
-									<p className="text-xs text-[#887f74]">
+									<p className="text-xs text-[var(--c-text-muted)]">
 										{guest.company ?? "Unknown company"}
 									</p>
 								</div>
@@ -979,7 +1138,7 @@ function AdminView({
 											}).then(onRefresh)
 										}
 										type="button"
-										className="min-h-9 rounded-lg border border-[#e6e0d6] px-3 text-xs font-semibold text-[#68452e]"
+										className="min-h-9 rounded-lg border border-[var(--c-border)] px-3 text-xs font-semibold text-[var(--c-text-mid)]"
 									>
 										Decline
 									</button>
@@ -991,7 +1150,7 @@ function AdminView({
 											}).then(onRefresh)
 										}
 										type="button"
-										className="min-h-9 rounded-lg bg-[#5a3c26] px-3 text-xs font-semibold text-white"
+										className="min-h-9 rounded-lg bg-[var(--c-brand)] px-3 text-xs font-semibold text-white"
 									>
 										Approve
 									</button>
@@ -1001,8 +1160,8 @@ function AdminView({
 					</div>
 				</section>
 			)}
-			<section className="rounded-2xl border border-[#e6e0d6] bg-[#fffdf9] p-4">
-				<h2 className="text-sm font-semibold text-[#33271f]">
+			<section className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] p-4">
+				<h2 className="text-sm font-semibold text-[var(--c-text-dark)]">
 					Today’s choices
 				</h2>
 				<div className="mt-3 grid gap-3">
@@ -1052,7 +1211,7 @@ function AdminResponseRow({
 		);
 	};
 	return (
-		<article className="rounded-xl bg-[#f8f5f0] p-3">
+		<article className="rounded-xl bg-[var(--c-row)] p-3">
 			<button
 				onClick={onToggle}
 				type="button"
@@ -1062,20 +1221,20 @@ function AdminResponseRow({
 					<p className="truncate text-sm font-semibold">
 						{compactName(poll.user)}
 					</p>
-					<p className="mt-1 truncate text-xs text-[#887f74]">
+					<p className="mt-1 truncate text-xs text-[var(--c-text-muted)]">
 						Morning: {poll.choices.morning} · Evening: {poll.choices.evening}
 					</p>
 				</div>
 				<ChevronRight
 					className={cx(
-						"shrink-0 text-[#887f74] transition",
+						"shrink-0 text-[var(--c-text-muted)] transition",
 						expanded && "rotate-90",
 					)}
 					size={16}
 				/>
 			</button>
 			{expanded && (
-				<div className="mt-3 border-t border-[#e6e0d6] pt-3">
+				<div className="mt-3 border-t border-[var(--c-border)] pt-3">
 					<div className="grid gap-3 sm:grid-cols-2">
 						{periods.map((period) => (
 							<AdminPeriodControl
@@ -1095,7 +1254,7 @@ function AdminResponseRow({
 						<button
 							onClick={removeGuest}
 							type="button"
-							className="mt-3 min-h-9 rounded-lg border border-[#e7cfc3] px-3 text-xs font-semibold text-[#8b4d35]"
+							className="mt-3 min-h-9 rounded-lg border border-[var(--c-border-err)] px-3 text-xs font-semibold text-[var(--c-text-err)]"
 						>
 							Remove guest
 						</button>
@@ -1121,15 +1280,15 @@ function AdminPeriodControl({
 	onSugarChange: (sugar: boolean) => void;
 }) {
 	return (
-		<section className="rounded-xl border border-[#eee8df] bg-[#fffdf9] p-3">
+		<section className="rounded-xl border border-[var(--c-border-2)] bg-[var(--c-card)] p-3">
 			<div className="flex items-center justify-between gap-3">
-				<h3 className="text-xs font-semibold text-[#887f74]">
+				<h3 className="text-xs font-semibold text-[var(--c-text-muted)]">
 					{period === "morning" ? "Morning" : "Evening"}
 				</h3>
 				<MetaTag muted>{sourceLabel(source)}</MetaTag>
 			</div>
 			<select
-				className="mt-2 h-10 w-full rounded-lg border border-[#e6e0d6] bg-[#fffdf9] px-2 text-sm font-semibold text-[#68452e]"
+				className="mt-2 h-10 w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-card)] px-2 text-sm font-semibold text-[var(--c-text-mid)]"
 				onChange={(event) => onDrinkChange(event.target.value as Drink)}
 				value={drink}
 			>
@@ -1153,36 +1312,59 @@ function Nav({
 	view,
 	setView,
 	admin = false,
+	mobile = false,
 }: {
 	view: View;
 	setView: (view: View) => void;
 	admin?: boolean;
+	mobile?: boolean;
 }) {
-	const items: Array<{ id: View; label: string; icon: React.ReactNode }> = [
-		{ id: "today", label: "Today", icon: <CalendarDays size={18} /> },
-		{ id: "history", label: "History", icon: <History size={18} /> },
-		{
-			id: "defaults",
-			label: "Defaults",
-			icon: <SlidersHorizontal size={18} />,
-		},
+	const items: Array<{ id: View; label: string; icon: React.ReactNode; iconActive: React.ReactNode }> = [
+		{ id: "today", label: "Poll", icon: <Coffee size={22} />, iconActive: <Coffee size={22} strokeWidth={2.5} /> },
+		{ id: "stats", label: "Stats", icon: <BarChart2 size={22} />, iconActive: <BarChart2 size={22} strokeWidth={2.5} /> },
+		{ id: "profile", label: "Profile", icon: <UserIcon size={22} />, iconActive: <UserIcon size={22} strokeWidth={2.5} /> },
 		...(!admin
 			? []
 			: [
 					{
 						id: "admin" as View,
 						label: "Admin",
-						icon: <ShieldCheck size={18} />,
+						icon: <ShieldCheck size={22} />,
+						iconActive: <ShieldCheck size={22} strokeWidth={2.5} />,
 					},
 				]),
 	];
+
+	if (mobile) {
+		return (
+			<nav className={cx("grid", admin ? "grid-cols-4" : "grid-cols-3")}>
+				{items.map((item) => {
+					const active = view === item.id;
+					return (
+						<button
+							key={item.id}
+							onClick={() => setView(item.id)}
+							type="button"
+							className="relative flex flex-col items-center gap-0.5 pb-2 pt-3 transition-colors"
+						>
+							{active && (
+								<span className="absolute inset-x-4 top-0 h-[2px] rounded-b-full bg-[var(--c-brand)]" />
+							)}
+							<span className={cx("transition-colors", active ? "text-[var(--c-brand)]" : "text-[var(--c-text-dim)]")}>
+								{active ? item.iconActive : item.icon}
+							</span>
+							<span className={cx("text-[10px] font-semibold tracking-wide transition-colors", active ? "text-[var(--c-brand)]" : "text-[var(--c-text-dim)]")}>
+								{item.label}
+							</span>
+						</button>
+					);
+				})}
+			</nav>
+		);
+	}
+
 	return (
-		<nav
-			className={cx(
-				"grid gap-2 lg:grid-cols-1",
-				admin ? "grid-cols-4" : "grid-cols-3",
-			)}
-		>
+		<nav className={cx("grid gap-2 lg:grid-cols-1", admin ? "grid-cols-4" : "grid-cols-3")}>
 			{items.map((item) => (
 				<button
 					key={item.id}
@@ -1191,8 +1373,8 @@ function Nav({
 					className={cx(
 						"flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-semibold transition lg:flex-row lg:justify-start lg:gap-2 lg:px-3 lg:text-sm",
 						view === item.id
-							? "bg-[#5a3c26] text-white"
-							: "text-[#887f74] hover:bg-[#f1ede6] hover:text-[#5a3c26]",
+							? "bg-[var(--c-brand)] text-white"
+							: "text-[var(--c-text-muted)] hover:bg-[var(--c-muted)] hover:text-[var(--c-brand)]",
 					)}
 				>
 					{item.icon}
@@ -1217,7 +1399,7 @@ function BrandMark({
 	return (
 		<div
 			className={cx(
-				"grid place-items-center rounded-[10px] bg-[#5a3c26] text-[#fff9ef]",
+				"grid place-items-center rounded-[10px] bg-[var(--c-brand)] text-[var(--c-cream)]",
 				className,
 			)}
 		>
@@ -1226,17 +1408,188 @@ function BrandMark({
 	);
 }
 
+const brewingMessages = [
+	"Grinding the beans...",
+	"Brewing your coffee...",
+	"Steaming the milk...",
+	"Milking the cow...",
+	"Heating the kettle...",
+	"Steeping the tea...",
+	"Frothing the milk...",
+	"Tamping the espresso...",
+	"Pulling the shot...",
+	"Warming your cup...",
+];
+function pickRandom(arr: string[]) {
+	return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function ProfileView({
+	user,
+	defaults,
+	sugarDefaults,
+	updateDefault,
+	onSignOut,
+	isGuest,
+	dark,
+	onToggleTheme,
+	historyDate,
+	setHistoryDate,
+	historyPolls,
+	historyLoading,
+}: {
+	user: User;
+	defaults: DrinkChoice;
+	sugarDefaults: SugarChoice;
+	updateDefault: (period: Period, drink: Drink, sugar: boolean) => void;
+	onSignOut: () => void;
+	isGuest: boolean;
+	dark: boolean;
+	onToggleTheme: () => void;
+	historyDate: string;
+	setHistoryDate: (d: string) => void;
+	historyPolls: PollRecord[];
+	historyLoading: boolean;
+}) {
+	const [defaultsOpen, setDefaultsOpen] = useState(false);
+	const [historyOpen, setHistoryOpen] = useState(false);
+	return (
+		<div className="grid gap-3">
+			<PageHeader eyebrow="Account" title="Profile" />
+
+			{/* User card */}
+			<section className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] shadow-[0_8px_30px_rgba(77,57,38,0.04)]">
+				<div className="flex items-center gap-4 p-4">
+					<span className="grid size-14 shrink-0 place-items-center rounded-full bg-[var(--c-brand-pale)] text-lg font-semibold text-[var(--c-brand)]">
+						{initials(user.name)}
+					</span>
+					<div className="min-w-0">
+						<p className="truncate font-semibold text-[var(--c-text-dark)]">{user.name}</p>
+						<p className="truncate text-sm text-[var(--c-text-muted)]">
+							{isGuest ? "Guest access" : user.email}
+						</p>
+					</div>
+				</div>
+
+				<div className="border-t border-[var(--c-border)]">
+					{/* Theme row */}
+					<div className="flex items-center justify-between px-4 py-3.5">
+						<span className="flex items-center gap-2.5 text-sm font-semibold text-[var(--c-text-mid)]">
+							{dark ? <Moon size={15} /> : <Sun size={15} />}
+							{dark ? "Dark mode" : "Light mode"}
+						</span>
+						<button
+							type="button"
+							onClick={onToggleTheme}
+							aria-label="Toggle theme"
+							aria-pressed={dark}
+							className="relative h-6 w-11 rounded-full transition-colors duration-200"
+							style={{ background: dark ? "var(--c-brand)" : "var(--c-toggle-off)" }}
+						>
+							<span
+								className={cx(
+									"absolute top-1 size-4 rounded-full bg-[var(--c-cream)] shadow transition-all duration-200",
+									dark ? "left-6" : "left-1",
+								)}
+							/>
+						</button>
+					</div>
+
+					{/* Drink defaults row */}
+					{!isGuest && (
+						<>
+							<button
+								type="button"
+								onClick={() => setDefaultsOpen((o) => !o)}
+								className="flex w-full items-center justify-between border-t border-[var(--c-border)] px-4 py-3.5 text-sm font-semibold text-[var(--c-text-mid)] transition hover:bg-[var(--c-muted)]"
+							>
+								<span className="flex items-center gap-2.5">
+									<Coffee size={15} />
+									Drink defaults
+								</span>
+								<ChevronRight
+									size={15}
+									className={cx("transition-transform duration-200 text-[var(--c-text-dim)]", defaultsOpen && "rotate-90")}
+								/>
+							</button>
+							{defaultsOpen && (
+								<div className="grid gap-3 border-t border-[var(--c-border)] px-4 py-4">
+									{periodDetails.map((period) => (
+										<DefaultDrinkSetting
+											key={period.id}
+											period={period}
+											selected={defaults[period.id]}
+											sugar={sugarDefaults[period.id]}
+											onSelect={(drink) =>
+												updateDefault(period.id, drink, sugarDefaults[period.id])
+											}
+											onToggleSugar={(sugar) =>
+												updateDefault(period.id, defaults[period.id], sugar)
+											}
+										/>
+									))}
+								</div>
+							)}
+						</>
+					)}
+
+					{/* History row */}
+					<>
+						<button
+							type="button"
+							onClick={() => setHistoryOpen((o) => !o)}
+							className="flex w-full items-center justify-between border-t border-[var(--c-border)] px-4 py-3.5 text-sm font-semibold text-[var(--c-text-mid)] transition hover:bg-[var(--c-muted)]"
+						>
+							<span className="flex items-center gap-2.5">
+								<CalendarDays size={15} />
+								History
+							</span>
+							<ChevronRight
+								size={15}
+								className={cx("transition-transform duration-200 text-[var(--c-text-dim)]", historyOpen && "rotate-90")}
+							/>
+						</button>
+						{historyOpen && (
+							<div className="border-t border-[var(--c-border)]">
+								<HistoryView
+									date={historyDate}
+									setDate={setHistoryDate}
+									polls={historyPolls}
+									loading={historyLoading}
+								/>
+							</div>
+						)}
+					</>
+
+					{/* Sign out row */}
+					<button
+						onClick={onSignOut}
+						type="button"
+						className="flex w-full items-center gap-2.5 border-t border-[var(--c-border)] px-4 py-3.5 text-sm font-semibold text-[var(--c-text-err)] transition hover:bg-[var(--c-err-bg)]"
+					>
+						<LogOut size={15} />
+						Sign out
+					</button>
+				</div>
+			</section>
+		</div>
+	);
+}
+
 function AuthLoading({
-	message = "Checking your account...",
+	message = pickRandom(brewingMessages),
 }: {
 	message?: string;
 }) {
 	return (
-		<main className="grid min-h-svh place-items-center bg-[#f6f5f1]">
-			<output
-				aria-label={message}
-				className="size-10 animate-spin rounded-full border-2 border-[#e6e0d6] border-t-[#5a3c26]"
-			/>
+		<main className="grid min-h-svh place-items-center bg-[var(--c-page)]">
+			<div className="flex flex-col items-center gap-4">
+				<output
+					aria-label={message}
+					className="size-10 animate-spin rounded-full border-2 border-[var(--c-border)] border-t-[var(--c-brand)]"
+				/>
+				<p className="text-sm text-[var(--c-text-muted)]">{message}</p>
+			</div>
 		</main>
 	);
 }
@@ -1250,7 +1603,7 @@ function SignInPage({
 	onLocalSignUp?: () => void;
 }) {
 	return (
-		<main className="relative grid min-h-svh place-items-center overflow-hidden bg-[#f6f5f1] px-5 py-10 text-[#fff9ef]">
+		<main className="relative grid min-h-svh place-items-center overflow-hidden bg-[var(--c-page)] px-5 py-10 text-[var(--c-cream)]">
 			<div
 				aria-hidden="true"
 				className="pointer-events-none absolute inset-0 overflow-hidden text-[#c9ad90]/35"
@@ -1264,9 +1617,9 @@ function SignInPage({
 					strokeWidth={0.7}
 				/>
 			</div>
-			<section className="relative z-10 flex w-full max-w-sm flex-col items-center rounded-3xl bg-[#5a3c26] px-6 py-9 text-center shadow-[0_20px_60px_rgba(77,57,38,0.2)] sm:px-8">
+			<section className="relative z-10 flex w-full max-w-sm flex-col items-center rounded-3xl bg-[var(--c-brand)] px-6 py-9 text-center shadow-[0_20px_60px_rgba(77,57,38,0.2)] sm:px-8">
 				<BrandMark
-					className="size-16 rounded-[18px] bg-[#fff9ef] text-[#5a3c26]"
+					className="size-16 rounded-[18px] bg-[var(--c-cream)] text-[var(--c-brand)]"
 					iconColor="#5a3c26"
 					iconSize={30}
 				/>
@@ -1277,7 +1630,7 @@ function SignInPage({
 				<button
 					onClick={signIn}
 					type="button"
-					className="mt-8 flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-[#fff9ef] text-sm font-semibold text-[#5a3c26] shadow-[0_12px_30px_rgba(38,24,16,0.22)] transition hover:bg-white"
+					className="mt-8 flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-[var(--c-cream)] text-sm font-semibold text-[var(--c-brand)] shadow-[0_12px_30px_rgba(38,24,16,0.22)] transition hover:bg-white"
 				>
 					<img alt="" className="size-5" src="/google-g.png" />
 					Continue with Google
@@ -1306,17 +1659,17 @@ function SignInPage({
 
 function AccessDeniedPage({ authError = false, onSignOut }: { authError?: boolean; onSignOut?: () => void }) {
 	return (
-		<main className="grid min-h-svh place-items-center bg-[#f6f5f1] px-5 text-[#33271f]">
-			<section className="w-full max-w-sm rounded-3xl bg-[#fffdf9] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
+		<main className="grid min-h-svh place-items-center bg-[var(--c-page)] px-5 text-[var(--c-text-dark)]">
+			<section className="w-full max-w-sm rounded-3xl bg-[var(--c-card)] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
 				<h1 className="font-serif text-3xl">Work email not recognized</h1>
-				<p className="mt-3 text-sm leading-6 text-[#887f74]">
+				<p className="mt-3 text-sm leading-6 text-[var(--c-text-muted)]">
 					Use an email from a registered company, or request guest access from a
 					company administrator.
 				</p>
 				{authError ? (
 					<a
 					href="/"
-					className="mt-7 inline-flex min-h-11 items-center rounded-xl bg-[#5a3c26] px-5 text-sm font-semibold text-white"
+					className="mt-7 inline-flex min-h-11 items-center rounded-xl bg-[var(--c-brand)] px-5 text-sm font-semibold text-white"
 					>
 						Back to MyBev
 					</a>
@@ -1324,7 +1677,7 @@ function AccessDeniedPage({ authError = false, onSignOut }: { authError?: boolea
 					<button
 						onClick={onSignOut}
 						type="button"
-						className="mt-7 min-h-11 rounded-xl bg-[#5a3c26] px-5 text-sm font-semibold text-white"
+						className="mt-7 min-h-11 rounded-xl bg-[var(--c-brand)] px-5 text-sm font-semibold text-white"
 					>
 						Sign out
 					</button>
@@ -1335,17 +1688,17 @@ function AccessDeniedPage({ authError = false, onSignOut }: { authError?: boolea
 }
 function GuestPendingPage({ onExit }: { onExit: () => void }) {
 	return (
-		<main className="grid min-h-svh place-items-center bg-[#f6f5f1] px-5 text-[#33271f]">
-			<section className="w-full max-w-sm rounded-3xl bg-[#fffdf9] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
+		<main className="grid min-h-svh place-items-center bg-[var(--c-page)] px-5 text-[var(--c-text-dark)]">
+			<section className="w-full max-w-sm rounded-3xl bg-[var(--c-card)] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
 				<h1 className="font-serif text-3xl">Waiting for approval</h1>
-				<p className="mt-3 text-sm leading-6 text-[#887f74]">
+				<p className="mt-3 text-sm leading-6 text-[var(--c-text-muted)]">
 					A company admin needs to approve your guest request before you can
 					join today’s polls.
 				</p>
 				<button
 					onClick={onExit}
 					type="button"
-					className="mt-7 min-h-11 rounded-xl border border-[#e6e0d6] px-5 text-sm font-semibold text-[#68452e]"
+					className="mt-7 min-h-11 rounded-xl border border-[var(--c-border)] px-5 text-sm font-semibold text-[var(--c-text-mid)]"
 				>
 					Exit guest access
 				</button>
@@ -1355,16 +1708,16 @@ function GuestPendingPage({ onExit }: { onExit: () => void }) {
 }
 function GuestRejectedPage({ onExit }: { onExit: () => void }) {
 	return (
-		<main className="grid min-h-svh place-items-center bg-[#f6f5f1] px-5 text-[#33271f]">
-			<section className="w-full max-w-sm rounded-3xl bg-[#fffdf9] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
+		<main className="grid min-h-svh place-items-center bg-[var(--c-page)] px-5 text-[var(--c-text-dark)]">
+			<section className="w-full max-w-sm rounded-3xl bg-[var(--c-card)] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
 				<h1 className="font-serif text-3xl">Guest request declined</h1>
-				<p className="mt-3 text-sm leading-6 text-[#887f74]">
+				<p className="mt-3 text-sm leading-6 text-[var(--c-text-muted)]">
 					Ask the company admin to approve your guest access.
 				</p>
 				<button
 					onClick={onExit}
 					type="button"
-					className="mt-7 min-h-11 rounded-xl border border-[#e6e0d6] px-5 text-sm font-semibold text-[#68452e]"
+					className="mt-7 min-h-11 rounded-xl border border-[var(--c-border)] px-5 text-sm font-semibold text-[var(--c-text-mid)]"
 				>
 					Exit guest access
 				</button>
@@ -1401,12 +1754,12 @@ function OnboardingPage({
 			sugarDefaults: { ...state.sugarDefaults, [period.id]: sugar },
 		});
 	return (
-		<main className="flex min-h-svh items-center justify-center bg-[#f6f5f1] px-4 py-8 text-[#33271f]">
+		<main className="flex min-h-svh items-center justify-center bg-[var(--c-page)] px-4 py-8 text-[var(--c-text-dark)]">
 			<div className="mx-auto w-full max-w-lg">
-				<h1 className="mb-5 font-serif text-2xl leading-tight text-[#33271f]">
+				<h1 className="mb-5 font-serif text-2xl leading-tight text-[var(--c-text-dark)]">
 					Choose your {period.label.toLowerCase()} default
 				</h1>
-				<section className="rounded-3xl bg-[#fffdf9] p-5 shadow-[0_20px_60px_rgba(77,57,38,0.1)] sm:p-8">
+				<section className="rounded-3xl bg-[var(--c-card)] p-5 shadow-[0_20px_60px_rgba(77,57,38,0.1)] sm:p-8">
 					<div className="flex justify-end">
 						<SugarToggle
 							compact
@@ -1417,7 +1770,7 @@ function OnboardingPage({
 					</div>
 					{error && (
 						<p
-							className="mt-3 rounded-xl border border-[#e7cfc3] bg-[#fff5f0] px-3 py-2 text-sm text-[#8b4d35]"
+							className="mt-3 rounded-xl border border-[var(--c-border-err)] bg-[var(--c-err-bg)] px-3 py-2 text-sm text-[var(--c-text-err)]"
 							role="alert"
 						>
 							{error}
@@ -1437,8 +1790,8 @@ function OnboardingPage({
 								className={cx(
 									"flex min-h-12 min-w-0 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition",
 									state.defaults[period.id] === drink
-										? "border-[#a36f43] bg-[#f6ece1] text-[#68452e]"
-										: "border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]",
+										? "border-[var(--c-brand-lt)] bg-[var(--c-accent-bg)] text-[var(--c-text-mid)]"
+										: "border-[var(--c-border-2)] text-[var(--c-text-soft)] hover:border-[var(--c-border-3)]",
 								)}
 							>
 								{drink}
@@ -1450,7 +1803,7 @@ function OnboardingPage({
 						<button
 							onClick={back}
 							type="button"
-							className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-[#e6e0d6] px-3 text-sm font-semibold text-[#68452e]"
+							className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-[var(--c-border)] px-3 text-sm font-semibold text-[var(--c-text-mid)]"
 						>
 							<ArrowLeft size={16} />
 							Back
@@ -1459,7 +1812,7 @@ function OnboardingPage({
 							disabled={!state.defaults[period.id]}
 							onClick={next}
 							type="button"
-							className="flex min-h-11 flex-[1.5] items-center justify-center gap-2 rounded-xl bg-[#5a3c26] px-4 text-sm font-semibold text-white transition hover:bg-[#68452e] disabled:cursor-not-allowed disabled:opacity-45"
+							className="flex min-h-11 flex-[1.5] items-center justify-center gap-2 rounded-xl bg-[var(--c-brand)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--c-text-mid)] disabled:cursor-not-allowed disabled:opacity-45"
 						>
 							{state.step === "evening" ? "Finish setup" : "Next"}
 							<ArrowRight size={17} />
@@ -1472,20 +1825,20 @@ function OnboardingPage({
 }
 function LocalSetupComplete({ onReset }: { onReset: () => void }) {
 	return (
-		<main className="grid min-h-svh place-items-center bg-[#f6f5f1] px-5 py-10 text-[#33271f]">
-			<section className="w-full max-w-sm rounded-3xl bg-[#fffdf9] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
-				<div className="mx-auto grid size-14 place-items-center rounded-2xl bg-[#5a3c26] text-[#fff9ef]">
+		<main className="grid min-h-svh place-items-center bg-[var(--c-page)] px-5 py-10 text-[var(--c-text-dark)]">
+			<section className="w-full max-w-sm rounded-3xl bg-[var(--c-card)] p-8 text-center shadow-[0_20px_60px_rgba(77,57,38,0.1)]">
+				<div className="mx-auto grid size-14 place-items-center rounded-2xl bg-[var(--c-brand)] text-[var(--c-cream)]">
 					<Check size={26} />
 				</div>
 				<h1 className="mt-6 font-serif text-3xl">Setup complete</h1>
-				<p className="mt-2 text-sm leading-6 text-[#887f74]">
+				<p className="mt-2 text-sm leading-6 text-[var(--c-text-muted)]">
 					The local test flow is complete. The app is not loaded in local signup
 					mode.
 				</p>
 				<button
 					onClick={onReset}
 					type="button"
-					className="mt-7 min-h-11 rounded-xl bg-[#5a3c26] px-4 text-sm font-semibold text-white"
+					className="mt-7 min-h-11 rounded-xl bg-[var(--c-brand)] px-4 text-sm font-semibold text-white"
 				>
 					Run setup again
 				</button>
@@ -1501,6 +1854,9 @@ function TodayView({
 	updateSugar,
 	onOpen,
 	guest = false,
+	isOnLeave = false,
+	onToggleLeave,
+	leaveLoading = false,
 }: {
 	entry: DrinkChoice;
 	sugar: SugarChoice;
@@ -1509,6 +1865,9 @@ function TodayView({
 	updateSugar: (period: Period, sugar: boolean) => void;
 	onOpen: (period: Period) => void;
 	guest?: boolean;
+	isOnLeave?: boolean;
+	onToggleLeave?: () => void;
+	leaveLoading?: boolean;
 }) {
 	return (
 		<div className="grid gap-5">
@@ -1517,7 +1876,39 @@ function TodayView({
 				title="Today"
 				action={`${todayPolls.length} people`}
 			/>
-			<div className="grid gap-3">
+			{!guest && (
+				<button
+					type="button"
+					onClick={onToggleLeave}
+					disabled={leaveLoading}
+					className={cx(
+						"flex items-center justify-between rounded-2xl border px-4 py-3 transition",
+						isOnLeave
+							? "border-[var(--c-brand-pale)] bg-[var(--c-accent-bg)]"
+							: "border-[var(--c-border)] bg-[var(--c-card)]",
+					)}
+				>
+					<span className={cx("text-sm font-semibold", isOnLeave ? "text-[var(--c-brand)]" : "text-[var(--c-text-mid)]")}>
+						{isOnLeave ? "On leave today" : "Mark as on leave"}
+					</span>
+					{leaveLoading ? (
+						<Loader2 size={18} className="animate-spin text-[var(--c-brand-lt)]" />
+					) : (
+						<span
+							className="relative h-6 w-11 rounded-full transition-colors duration-200"
+							style={{ background: isOnLeave ? "var(--c-brand)" : "var(--c-toggle-off)" }}
+						>
+							<span
+								className={cx(
+									"absolute top-1 size-4 rounded-full bg-[var(--c-cream)] shadow transition-all duration-200",
+									isOnLeave ? "left-6" : "left-1",
+								)}
+							/>
+						</span>
+					)}
+				</button>
+			)}
+			<div className={cx("grid gap-3", isOnLeave && "pointer-events-none opacity-40")}>
 				{periodDetails.map((period) => (
 					<DrinkPoll
 						key={period.id}
@@ -1535,44 +1926,283 @@ function TodayView({
 		</div>
 	);
 }
+function MiniCalendar({ selected, onSelect }: { selected: string; onSelect: (d: string) => void }) {
+	const [viewYear, setViewYear] = useState(() => Number(selected.slice(0, 4)));
+	const [viewMonth, setViewMonth] = useState(() => Number(selected.slice(5, 7)) - 1);
+
+	const todayParts = todayKey.split("-").map(Number);
+	const todayY = todayParts[0], todayM = todayParts[1] - 1, todayD = todayParts[2];
+
+	const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+	const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+	const monthName = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(new Date(viewYear, viewMonth));
+
+	const canNext = viewYear < todayY || (viewYear === todayY && viewMonth < todayM);
+
+	function prevMonth() {
+		if (viewMonth === 0) { setViewMonth(11); setViewYear((y) => y - 1); }
+		else setViewMonth((m) => m - 1);
+	}
+	function nextMonth() {
+		if (!canNext) return;
+		if (viewMonth === 11) { setViewMonth(0); setViewYear((y) => y + 1); }
+		else setViewMonth((m) => m + 1);
+	}
+
+	const cells: Array<{ day: number | null; key: string | null; disabled: boolean; isToday: boolean; isSelected: boolean }> = [];
+	for (let i = 0; i < firstDay; i++) cells.push({ day: null, key: null, disabled: true, isToday: false, isSelected: false });
+	for (let d = 1; d <= daysInMonth; d++) {
+		const key = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+		const disabled = viewYear > todayY || (viewYear === todayY && viewMonth > todayM) || (viewYear === todayY && viewMonth === todayM && d > todayD);
+		cells.push({ day: d, key, disabled, isToday: viewYear === todayY && viewMonth === todayM && d === todayD, isSelected: key === selected });
+	}
+
+	return (
+		<div className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] p-4 shadow-[0_8px_30px_rgba(77,57,38,0.04)]">
+			<div className="mb-3 flex items-center justify-between">
+				<button type="button" onClick={prevMonth} className="grid size-8 place-items-center rounded-lg text-[var(--c-text-muted)] transition hover:bg-[var(--c-muted)]">
+					<ArrowLeft size={14} />
+				</button>
+				<span className="text-sm font-semibold text-[var(--c-text-dark)]">{monthName}</span>
+				<button type="button" onClick={nextMonth} disabled={!canNext} className="grid size-8 place-items-center rounded-lg text-[var(--c-text-muted)] transition hover:bg-[var(--c-muted)] disabled:opacity-30">
+					<ArrowRight size={14} />
+				</button>
+			</div>
+			<div className="mb-1 grid grid-cols-7 text-center">
+				{["S","M","T","W","T","F","S"].map((d, i) => (
+					<span key={i} className="text-[10px] font-semibold text-[var(--c-text-dim)]">{d}</span>
+				))}
+			</div>
+			<div className="grid grid-cols-7 gap-y-0.5 text-center">
+				{cells.map((cell, i) =>
+					cell.day === null ? (
+						<span key={i} />
+					) : (
+						<button
+							key={cell.key}
+							type="button"
+							disabled={cell.disabled}
+							onClick={() => cell.key && onSelect(cell.key)}
+							className={cx(
+								"mx-auto flex size-8 items-center justify-center rounded-full text-xs font-semibold transition",
+								cell.isSelected
+									? "bg-[var(--c-brand)] text-white"
+									: cell.isToday
+									? "bg-[var(--c-accent-bg)] text-[var(--c-brand)]"
+									: cell.disabled
+									? "text-[var(--c-text-dim)] opacity-30"
+									: "text-[var(--c-text)] hover:bg-[var(--c-muted)]",
+							)}
+						>
+							{cell.day}
+						</button>
+					)
+				)}
+			</div>
+		</div>
+	);
+}
+
+const drinkColors: Partial<Record<Drink, string>> = {
+	Tea: "#a36f43",
+	Coffee: "#5a3c26",
+	"Green tea": "#5a7a3c",
+	Milk: "#c8956a",
+	"Black Coffee": "#2d2925",
+	"Black Tea": "#68452e",
+	"No drink": "#dbc9b6",
+};
+
+const healthAdvice: Record<string, string[]> = {
+	Tea: ["Great antioxidant choice", "Try without sugar for max benefits", "Ideal for steady afternoon energy"],
+	Coffee: ["Best enjoyed before noon to protect sleep", "Pair with food to reduce acidity", "2 cups/day is a sweet spot for most"],
+	"Green tea": ["Best drunk between meals, not with food", "L-theanine gives calm, sustained focus", "Avoid adding milk, it reduces antioxidants"],
+	Milk: ["Good protein and calcium source", "Consider low-fat if watching calories", "Great post-workout recovery drink"],
+	"Black Coffee": ["Zero-calorie fuel", "Wait 90 min after waking before first cup", "Avoid after 2pm to protect sleep"],
+	"Black Tea": ["Strong antioxidant profile", "Have it without sugar for best effect", "Drink between meals to maximise iron absorption"],
+	"No drink": ["Hydrate with water instead", "Consider herbal teas for variety", "Skipping caffeine occasionally is healthy"],
+};
+
+function StatsView() {
+	const [stats, setStats] = useState<import("#/routes/api/stats").StatsResponse | null>(null);
+	const [fetching, setFetching] = useState(true);
+	const [range, setRange] = useState(30);
+
+	useEffect(() => {
+		setFetching(true);
+		void getStats(range)
+			.then(setStats)
+			.finally(() => setFetching(false));
+	}, [range]);
+
+	if (fetching && !stats) return (
+		<div className="flex items-center justify-center py-20">
+			<Loader2 size={28} className="animate-spin text-[var(--c-brand-lt)]" />
+		</div>
+	);
+	if (!stats) return null;
+
+	const topDrinks = drinks
+		.filter((d) => d !== "No drink")
+		.map((d) => ({ drink: d, count: stats.byDrink[d] ?? 0 }))
+		.filter((d) => d.count > 0)
+		.sort((a, b) => b.count - a.count);
+
+	const maxCount = Math.max(...topDrinks.map((d) => d.count), 1);
+	const mostCommon = topDrinks[0]?.drink;
+	const advice = mostCommon ? healthAdvice[mostCommon] ?? [] : [];
+
+	return (
+		<div className="grid gap-5">
+			<PageHeader eyebrow="Your data" title="Stats" />
+
+			{/* Range selector */}
+			<div className="flex items-center gap-2">
+				{([7, 30, 90] as const).map((d) => (
+					<button
+						key={d}
+						type="button"
+						onClick={() => setRange(d)}
+						className={cx(
+							"flex-1 rounded-xl border py-2 text-sm font-semibold transition",
+							range === d
+								? "border-[var(--c-brand)] bg-[var(--c-brand)] text-white"
+								: "border-[var(--c-border)] text-[var(--c-text-muted)] hover:bg-[var(--c-muted)]",
+						)}
+					>
+						{d}d
+					</button>
+				))}
+				{fetching && <Loader2 size={16} className="shrink-0 animate-spin text-[var(--c-brand-lt)]" />}
+			</div>
+
+			{/* Summary cards */}
+			<div className="grid grid-cols-3 gap-2">
+				<div className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] px-3 py-3 text-center">
+					<p className="text-2xl font-bold text-[var(--c-brand)]">{stats.streak}</p>
+					<p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--c-text-dim)]">Day streak</p>
+				</div>
+				<div className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] px-3 py-3 text-center">
+					<p className="text-2xl font-bold text-[var(--c-brand)]">{stats.totalDays}</p>
+					<p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--c-text-dim)]">Days logged</p>
+				</div>
+				<div className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] px-3 py-3 text-center">
+					<p className="text-2xl font-bold text-[var(--c-brand)]">{stats.sugarRate}%</p>
+					<p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--c-text-dim)]">With sugar</p>
+				</div>
+			</div>
+
+			{/* Bar chart */}
+			{topDrinks.length > 0 && (
+				<section className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] p-4">
+					<h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--c-brand-lt)]">Drink breakdown</h3>
+					<div className="grid gap-2.5">
+						{topDrinks.map(({ drink, count }) => (
+							<div key={drink}>
+								<div className="mb-1 flex items-center justify-between text-xs font-semibold">
+									<span className="text-[var(--c-text-mid)]">{drink}</span>
+									<span className="text-[var(--c-text-dim)]">{count}×</span>
+								</div>
+								<div className="h-2 w-full overflow-hidden rounded-full bg-[var(--c-muted)]">
+									<div
+										className="h-full rounded-full transition-all duration-500"
+										style={{
+											width: `${Math.round((count / maxCount) * 100)}%`,
+											background: drinkColors[drink] ?? "var(--c-brand)",
+										}}
+									/>
+								</div>
+							</div>
+						))}
+					</div>
+				</section>
+			)}
+
+			{/* Morning vs Evening split */}
+			{topDrinks.length > 0 && (
+				<section className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] p-4">
+					<h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--c-brand-lt)]">Morning vs Evening</h3>
+					<div className="grid grid-cols-2 gap-4">
+						{(["morning", "evening"] as const).map((period) => {
+							const periodCounts = stats.byPeriod[period];
+							const top = drinks
+								.map((d) => ({ drink: d, count: periodCounts[d] ?? 0 }))
+								.filter((d) => d.count > 0)
+								.sort((a, b) => b.count - a.count)
+								.slice(0, 3);
+							return (
+								<div key={period}>
+									<p className="mb-2 text-xs font-semibold capitalize text-[var(--c-text-muted)]">{period}</p>
+									{top.map(({ drink, count }) => (
+										<div key={drink} className="mb-1 flex items-center gap-2 text-xs">
+											<span
+												className="size-2 shrink-0 rounded-full"
+												style={{ background: drinkColors[drink] ?? "var(--c-brand)" }}
+											/>
+											<span className="min-w-0 truncate text-[var(--c-text-mid)]">{drink}</span>
+											<span className="ml-auto shrink-0 text-[var(--c-text-dim)]">{count}</span>
+										</div>
+									))}
+								</div>
+							);
+						})}
+					</div>
+				</section>
+			)}
+
+			{/* Health advice */}
+			{advice.length > 0 && (
+				<section className="rounded-2xl border border-[var(--c-border-2)] bg-[var(--c-accent-bg)] p-4">
+					<h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--c-brand-lt)]">
+						Health tips · {mostCommon}
+					</h3>
+					<ul className="grid gap-2">
+						{advice.map((tip) => (
+							<li key={tip} className="flex items-start gap-2 text-sm text-[var(--c-text-mid)]">
+								<Coffee size={13} className="mt-0.5 shrink-0 text-[var(--c-brand-lt)]" />
+								{tip}
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
+
+			{stats.totalDays === 0 && (
+				<div className="rounded-2xl border border-dashed border-[var(--c-empty)] bg-[var(--c-card)] px-4 py-10 text-center text-sm text-[var(--c-text-muted)]">
+					No data yet. Start logging your drinks!
+				</div>
+			)}
+		</div>
+	);
+}
+
 function HistoryView({
 	date,
 	setDate,
 	polls,
+	loading = false,
 }: {
 	date: string;
 	setDate: (date: string) => void;
 	polls: PollRecord[];
+	loading?: boolean;
 }) {
-	const nextDate = shiftDateKey(date, 1);
-	const canMoveForward = nextDate < todayKey;
 	return (
-		<div className="grid gap-5">
-			<PageHeader
-				eyebrow="History"
-				title={displayDate(date)}
-				action={polls.length ? `${polls.length} people` : "No responses"}
-			/>
-			<div className="flex items-center justify-between gap-3 rounded-2xl border border-[#e6e0d6] bg-[#fffdf9] p-2">
-				<button
-					onClick={() => setDate(shiftDateKey(date, -1))}
-					type="button"
-					className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-[#68452e] transition hover:bg-[#f1ede6]"
-				>
-					<ArrowLeft size={16} />
-					Previous
-				</button>
-				<button
-					disabled={!canMoveForward}
-					onClick={() => setDate(nextDate)}
-					type="button"
-					className="flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-[#68452e] transition hover:bg-[#f1ede6] disabled:cursor-not-allowed disabled:opacity-45"
-				>
-					Next
-					<ArrowRight size={16} />
-				</button>
+		<div className="grid gap-4 px-4 py-4">
+			<div className="flex items-center justify-between">
+				<span className="text-sm font-semibold text-[var(--c-text-dark)]">{displayDate(date)}</span>
+				{polls.length > 0 && (
+					<span className="text-xs text-[var(--c-text-muted)]">{polls.length} people</span>
+				)}
 			</div>
-			<HistoryResponseCards polls={polls} />
+			<MiniCalendar selected={date} onSelect={setDate} />
+			{loading ? (
+				<div className="flex items-center justify-center py-8">
+					<Loader2 size={24} className="animate-spin text-[var(--c-brand-lt)]" />
+				</div>
+			) : (
+				<HistoryResponseCards polls={polls} />
+			)}
 		</div>
 	);
 }
@@ -1595,7 +2225,7 @@ function HistoryResponseCards({ polls }: { polls: PollRecord[] }) {
 		.filter((group) => group.entries.length > 0);
 	if (!polls.length)
 		return (
-			<div className="rounded-2xl border border-dashed border-[#dbcfc1] bg-[#fffdf9] px-4 py-8 text-center text-sm text-[#887f74]">
+			<div className="rounded-2xl border border-dashed border-[var(--c-empty)] bg-[var(--c-card)] px-4 py-8 text-center text-sm text-[var(--c-text-muted)]">
 				No responses for this day.
 			</div>
 		);
@@ -1603,7 +2233,7 @@ function HistoryResponseCards({ polls }: { polls: PollRecord[] }) {
 		<div className="grid gap-3">
 			{rows.map((group) => (
 				<article
-					className="overflow-hidden rounded-2xl border border-[#e6e0d6] bg-[#fffdf9] shadow-[0_8px_30px_rgba(77,57,38,0.04)]"
+					className="overflow-hidden rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] shadow-[0_8px_30px_rgba(77,57,38,0.04)]"
 					key={group.drink}
 				>
 					<button
@@ -1615,29 +2245,29 @@ function HistoryResponseCards({ polls }: { polls: PollRecord[] }) {
 						type="button"
 						className="flex min-h-14 w-full items-center justify-between gap-3 px-4 text-left"
 					>
-						<span className="text-sm font-semibold text-[#33271f]">
+						<span className="text-sm font-semibold text-[var(--c-text-dark)]">
 							{group.drink}
 						</span>
-						<span className="text-xs font-semibold text-[#887f74]">
+						<span className="text-xs font-semibold text-[var(--c-text-muted)]">
 							{group.entries.length}
 						</span>
 					</button>
 					{openDrink === group.drink && (
-						<div className="grid gap-2 border-t border-[#eee8df] p-3">
+						<div className="grid gap-2 border-t border-[var(--c-border-2)] p-3">
 							{group.entries.map((entry) => (
 								<div
-									className="flex items-center justify-between gap-3 rounded-xl bg-[#f8f5f0] px-3 py-2.5"
+									className="flex items-center justify-between gap-3 rounded-xl bg-[var(--c-row)] px-3 py-2.5"
 									key={`${entry.user.email}-${entry.period}`}
 								>
 									<div className="flex min-w-0 items-center gap-2.5">
-										<span className="grid size-8 shrink-0 place-items-center rounded-full bg-[#eee1d1] text-[11px] font-semibold text-[#68452e]">
+										<span className="grid size-8 shrink-0 place-items-center rounded-full bg-[var(--c-avatar)] text-[11px] font-semibold text-[var(--c-text-mid)]">
 											{initials(compactName(entry.user))}
 										</span>
 										<div className="min-w-0">
 											<p className="truncate text-sm font-semibold">
 												{compactName(entry.user)}
 											</p>
-											<p className="text-xs text-[#887f74]">
+											<p className="text-xs text-[var(--c-text-muted)]">
 												{entry.period === "morning" ? "Morning" : "Evening"}
 											</p>
 										</div>
@@ -1655,37 +2285,6 @@ function HistoryResponseCards({ polls }: { polls: PollRecord[] }) {
 		</div>
 	);
 }
-function DefaultsView({
-	defaults,
-	sugarDefaults,
-	updateDefault,
-}: {
-	defaults: DrinkChoice;
-	sugarDefaults: SugarChoice;
-	updateDefault: (period: Period, drink: Drink, sugar: boolean) => void;
-}) {
-	return (
-		<div className="grid gap-5">
-			<PageHeader eyebrow="Defaults" title="Choose drinks" />
-			<div className="grid gap-3">
-				{periodDetails.map((period) => (
-					<DefaultDrinkSetting
-						key={period.id}
-						period={period}
-						selected={defaults[period.id]}
-						sugar={sugarDefaults[period.id]}
-						onSelect={(drink) =>
-							updateDefault(period.id, drink, sugarDefaults[period.id])
-						}
-						onToggleSugar={(sugar) =>
-							updateDefault(period.id, defaults[period.id], sugar)
-						}
-					/>
-				))}
-			</div>
-		</div>
-	);
-}
 function DefaultDrinkSetting({
 	period,
 	selected,
@@ -1700,13 +2299,13 @@ function DefaultDrinkSetting({
 	onToggleSugar: (sugar: boolean) => void;
 }) {
 	return (
-		<section className="rounded-2xl border border-[#e6e0d6] bg-[#fffdf9] p-4 shadow-[0_8px_30px_rgba(77,57,38,0.04)] sm:p-5">
+		<section className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] p-4 shadow-[0_8px_30px_rgba(77,57,38,0.04)] sm:p-5">
 			<div className="flex items-start justify-between gap-3">
 				<div className="flex items-start gap-3">
-					<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#f1ede6] text-[#a36f43]">
+					<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[var(--c-muted)] text-[var(--c-brand-lt)]">
 						<Coffee size={17} />
 					</span>
-					<h2 className="pt-1 text-sm font-semibold text-[#33271f]">
+					<h2 className="pt-1 text-sm font-semibold text-[var(--c-text-dark)]">
 						{period.label}
 					</h2>
 				</div>
@@ -1726,8 +2325,8 @@ function DefaultDrinkSetting({
 						className={cx(
 							"flex min-h-11 items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold transition",
 							selected === drink
-								? "border-[#a36f43] bg-[#f6ece1] text-[#68452e]"
-								: "border-[#eee8df] text-[#665b50] hover:border-[#dbc9b6]",
+								? "border-[var(--c-brand-lt)] bg-[var(--c-accent-bg)] text-[var(--c-text-mid)]"
+								: "border-[var(--c-border-2)] text-[var(--c-text-soft)] hover:border-[var(--c-border-3)]",
 						)}
 					>
 						{drink}
@@ -1748,17 +2347,17 @@ function PageHeader({
 	action?: string;
 }) {
 	return (
-		<div className="flex items-end justify-between gap-4 border-b border-[#e6e0d6] pb-4">
+		<div className="flex items-end justify-between gap-4 border-b border-[var(--c-border)] pb-4">
 			<div>
-				<p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#a36f43]">
+				<p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--c-brand-lt)]">
 					{eyebrow}
 				</p>
-				<h1 className="mt-1 font-serif text-3xl tracking-[-0.03em] text-[#33271f] sm:text-4xl">
+				<h1 className="mt-1 font-serif text-3xl tracking-[-0.03em] text-[var(--c-text-dark)] sm:text-4xl">
 					{title}
 				</h1>
 			</div>
 			{action && (
-				<span className="shrink-0 text-xs font-semibold text-[#9a9084]">
+				<span className="shrink-0 text-xs font-semibold text-[var(--c-text-dim)]">
 					{action}
 				</span>
 			)}
@@ -1784,8 +2383,8 @@ function SugarToggle({
 			disabled={disabled}
 			className={cx(
 				compact
-					? "flex shrink-0 items-center gap-2 text-xs font-semibold text-[#68452e]"
-					: "mt-3 flex min-h-10 w-full items-center justify-between rounded-xl border border-[#e6e0d6] px-3 text-left transition hover:border-[#a36f43]",
+					? "flex shrink-0 items-center gap-2 text-xs font-semibold text-[var(--c-text-mid)]"
+					: "mt-3 flex min-h-10 w-full items-center justify-between rounded-xl border border-[var(--c-border)] px-3 text-left transition hover:border-[var(--c-brand-lt)]",
 				disabled && "cursor-not-allowed opacity-45",
 			)}
 			onClick={() => onChange(!sugar)}
@@ -1798,7 +2397,7 @@ function SugarToggle({
 					Sugar Free
 				</span>
 				{!compact && (
-					<span className="block text-xs text-[#9a9084]">
+					<span className="block text-xs text-[var(--c-text-dim)]">
 						{sugar ? "Off" : "On"}
 					</span>
 				)}
@@ -1806,7 +2405,7 @@ function SugarToggle({
 			<span
 				className={cx(
 					"relative h-6 w-11 rounded-full transition",
-					sugar ? "bg-[#d8cec2]" : "bg-[#a36f43]",
+					sugar ? "bg-[var(--c-toggle-off)]" : "bg-[var(--c-brand-lt)]",
 				)}
 			>
 				<span
@@ -1840,18 +2439,19 @@ function DrinkPoll({
 }) {
 	const counts = countChoices(polls.map((entry) => entry.choices))[period.id];
 	const total = polls.length;
+	const [infoDrink, setInfoDrink] = useState<Drink | null>(null);
 	return (
-		<div className="overflow-hidden rounded-2xl border border-[#e6e0d6] bg-[#fffdf9] shadow-[0_8px_30px_rgba(77,57,38,0.04)]">
-			<div className="flex items-center justify-between gap-4 border-b border-[#eee8df] px-4 py-3.5 sm:px-5">
+		<div className="overflow-hidden rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] shadow-[0_8px_30px_rgba(77,57,38,0.04)]">
+			<div className="flex items-center justify-between gap-4 border-b border-[var(--c-border-2)] px-4 py-3.5 sm:px-5">
 				<span className="flex items-center gap-2.5">
-					<span className="grid size-8 place-items-center rounded-lg bg-[#f1ede6] text-[#a36f43]">
+					<span className="grid size-8 place-items-center rounded-lg bg-[var(--c-muted)] text-[var(--c-brand-lt)]">
 						<Coffee size={16} />
 					</span>
 					<span>
-						<span className="block text-sm font-semibold text-[#33271f]">
+						<span className="block text-sm font-semibold text-[var(--c-text-dark)]">
 							{period.label}
 						</span>
-						<span className="block text-xs text-[#9a9084]">
+						<span className="block text-xs text-[var(--c-text-dim)]">
 							{total} {total === 1 ? "response" : "responses"}
 						</span>
 					</span>
@@ -1868,47 +2468,56 @@ function DrinkPoll({
 					const count = counts[drink];
 					const percent = total ? Math.round((counts[drink] / total) * 100) : 0;
 					return (
-						<button
-							key={drink}
-							disabled={!editable}
-							onClick={() => onSelect?.(drink)}
-							type="button"
-							className={cx(
-								"relative flex min-h-11 items-center justify-between overflow-hidden rounded-xl border px-3.5 text-left text-sm font-semibold",
-								editable
-									? "transition hover:border-[#dbc9b6]"
-									: "cursor-default",
-								selected === drink
-									? "border-[#a36f43] bg-[#f6ece1] text-[#68452e]"
-									: "border-[#eee8df] text-[#665b50]",
-							)}
-						>
-							<span
-								className="absolute inset-y-0 left-0 bg-[#f6ece1] transition-all"
-								style={{
-									width: editable
-										? selected === drink
-											? "100%"
-											: "0%"
-										: `${percent}%`,
-								}}
-							/>
-							<span className="relative">{drink}</span>
-							<span className="relative flex items-center gap-2 text-xs text-[#887f74]">
-								{count}
-								{selected === drink && (
-									<span className="grid size-5 place-items-center rounded-full bg-[#a36f43] text-white">
-										<Check size={13} strokeWidth={3} />
-									</span>
+						<div key={drink} className="flex items-center gap-1">
+							<button
+								disabled={!editable}
+								onClick={() => onSelect?.(drink)}
+								type="button"
+								className={cx(
+									"relative flex min-h-11 flex-1 items-center justify-between overflow-hidden rounded-xl border px-3.5 text-left text-sm font-semibold",
+									editable
+										? "transition hover:border-[var(--c-border-3)]"
+										: "cursor-default",
+									selected === drink
+										? "border-[var(--c-brand-lt)] bg-[var(--c-accent-bg)] text-[var(--c-text-mid)]"
+										: "border-[var(--c-border-2)] text-[var(--c-text-soft)]",
 								)}
-							</span>
-						</button>
+							>
+								<span
+									className="absolute inset-y-0 left-0 bg-[var(--c-accent-bg)] transition-all"
+									style={{
+										width: editable
+											? selected === drink
+												? "100%"
+												: "0%"
+											: `${percent}%`,
+									}}
+								/>
+								<span className="relative">{drink}</span>
+								<span className="relative flex items-center gap-2 text-xs text-[var(--c-text-muted)]">
+									{count}
+									{selected === drink && (
+										<span className="grid size-5 place-items-center rounded-full bg-[var(--c-brand-lt)] text-white">
+											<Check size={13} strokeWidth={3} />
+										</span>
+									)}
+								</span>
+							</button>
+							<button
+								type="button"
+								onClick={() => setInfoDrink(drink)}
+								className="grid size-7 shrink-0 place-items-center rounded-lg text-[var(--c-text-dim)] opacity-60 transition hover:bg-[var(--c-muted)] hover:opacity-100"
+								aria-label={`Info about ${drink}`}
+							>
+								<Info size={14} />
+							</button>
+						</div>
 					);
 				})}
 			</div>
 			{onOpen && (
 				<button
-					className="mx-3 mb-3 flex min-h-11 w-[calc(100%-1.5rem)] items-center justify-center gap-2 rounded-xl bg-[#5a3c26] text-sm font-semibold text-white transition hover:bg-[#68452e] sm:mx-4 sm:mb-4 sm:w-[calc(100%-2rem)]"
+					className="mx-3 mb-3 flex min-h-11 w-[calc(100%-1.5rem)] items-center justify-center gap-2 rounded-xl bg-[var(--c-brand)] text-sm font-semibold text-white transition hover:bg-[var(--c-text-mid)] sm:mx-4 sm:mb-4 sm:w-[calc(100%-2rem)]"
 					onClick={onOpen}
 					type="button"
 				>
@@ -1916,6 +2525,263 @@ function DrinkPoll({
 					View details
 				</button>
 			)}
+			{infoDrink && <DrinkInfoSheet drink={infoDrink} onClose={() => setInfoDrink(null)} />}
+		</div>
+	);
+}
+
+function GlassEasterEgg({ onClose }: { onClose: () => void }) {
+	const [activeDrink, setActiveDrink] = useState<Drink>("Coffee");
+	const { tilt, permission, requestPermission } = useGyroscope();
+	const color = drinkColors[activeDrink] ?? "#a36f43";
+
+	// Fill level: starts full, decreases as user tilts forward to "drink"
+	// beta ~90 = upright; tipping toward face decreases beta; < 45 = drinking gesture
+	const [fill, setFill] = useState(0.75);
+	const drinkingRef = useState<ReturnType<typeof setInterval> | null>(null);
+
+	useEffect(() => {
+		const isDrinking = tilt.beta < 45 && activeDrink !== "No drink" && fill > 0;
+		if (isDrinking) {
+			const id = setInterval(() => {
+				setFill((f) => Math.max(0, f - 0.008));
+			}, 50);
+			drinkingRef[1](id);
+			return () => clearInterval(id);
+		}
+		if (drinkingRef[0]) {
+			clearInterval(drinkingRef[0]);
+			drinkingRef[1](null);
+		}
+	}, [tilt.beta, activeDrink]);
+
+	// Reset fill when drink changes
+	useEffect(() => {
+		setFill(activeDrink === "No drink" ? 0.04 : 0.75);
+	}, [activeDrink]);
+
+	const fillLevel = activeDrink === "No drink" ? 0.04 : fill;
+	const liquidShift = tilt.gamma * 0.8;
+	const isDrinking = tilt.beta < 45 && fillLevel > 0;
+
+	const bubbles = [
+		{ x: 28, delay: "0s", size: 3 },
+		{ x: 52, delay: "0.5s", size: 2.5 },
+		{ x: 72, delay: "0.9s", size: 4 },
+		{ x: 40, delay: "1.4s", size: 2 },
+		{ x: 64, delay: "0.2s", size: 3 },
+		{ x: 82, delay: "1.1s", size: 2 },
+	];
+
+	// Permission-first screen
+	if (permission !== "granted") {
+		return (
+			<div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-[var(--c-page)] px-8 text-center">
+				<button type="button" onClick={onClose} className="absolute right-5 top-5 text-sm font-semibold text-[var(--c-text-muted)] transition hover:text-[var(--c-brand)]">
+					Close
+				</button>
+				<div className="grid size-20 place-items-center rounded-full bg-[var(--c-accent-bg)] text-[var(--c-brand)]">
+					<Coffee size={36} />
+				</div>
+				<div>
+					<h2 className="font-serif text-2xl font-bold text-[var(--c-text-dark)]">Glass Simulator</h2>
+					<p className="mt-2 text-sm text-[var(--c-text-muted)]">Tilt your phone to swirl your drink.<br />Tilt forward to take a sip.</p>
+				</div>
+				{permission === "unknown" && (
+					<button
+						type="button"
+						onClick={requestPermission}
+						className="rounded-full bg-[var(--c-brand)] px-8 py-3 text-sm font-semibold text-white transition hover:bg-[var(--c-brand-h)]"
+					>
+						Enable motion sensor
+					</button>
+				)}
+				{permission === "denied" && (
+					<p className="text-sm text-[var(--c-text-err)]">Permission denied. Enable Motion in iOS Settings.</p>
+				)}
+			</div>
+		);
+	}
+
+	return (
+		<div className="fixed inset-0 z-50 flex flex-col bg-[var(--c-page)]">
+			{/* Header */}
+			<div className="flex items-center justify-between border-b border-[var(--c-border)] px-5 py-4">
+				<span className="font-serif text-lg font-bold text-[var(--c-brand)]">Glass Simulator</span>
+				<button type="button" onClick={onClose} className="text-sm font-semibold text-[var(--c-text-muted)] transition hover:text-[var(--c-brand)]">
+					Done
+				</button>
+			</div>
+
+			{/* Glass */}
+			<div className="flex flex-1 flex-col items-center justify-center gap-3">
+				<div
+					style={{
+						transform: `rotate(${tilt.gamma * 0.4 + (isDrinking ? 40 : 0)}deg) translateY(${isDrinking ? -15 : 0}px)`,
+						transition: "transform 0.06s linear",
+					}}
+				>
+					<svg width="160" height="240" viewBox="0 0 160 240" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<defs>
+							<clipPath id="egg-glass-clip">
+								<path d="M28 12 L132 12 L118 222 L42 222 Z" />
+							</clipPath>
+						</defs>
+						<g clipPath="url(#egg-glass-clip)">
+							<rect x="-20" y={12 + (1 - fillLevel) * 210} width="200" height="230" fill={color} opacity="0.88" />
+							{fillLevel > 0.05 && (
+								<polygon
+									points={`
+										${-20 + liquidShift - 20},${12 + (1 - fillLevel) * 210 + liquidShift * 0.3}
+										${180 + liquidShift + 20},${12 + (1 - fillLevel) * 210 - liquidShift * 0.3}
+										${180 + liquidShift + 20},${12 + (1 - fillLevel) * 210 - liquidShift * 0.3 - 12}
+										${-20 + liquidShift - 20},${12 + (1 - fillLevel) * 210 + liquidShift * 0.3 - 12}
+									`}
+									fill={color} opacity="0.45"
+								/>
+							)}
+							{fillLevel > 0.05 && bubbles.map((b, i) => (
+								<circle
+									key={i}
+									cx={b.x + liquidShift * 0.25}
+									cy="160"
+									r={b.size}
+									fill="white" opacity="0.3"
+									style={{ animation: `bubble-rise 2.2s ${b.delay} infinite ease-in` }}
+								/>
+							))}
+						</g>
+						<path d="M28 12 L132 12 L118 222 L42 222 Z" stroke="var(--c-border-3)" strokeWidth="3.5" fill="none" strokeLinejoin="round" />
+						<path d="M42 24 L47 188" stroke="white" strokeWidth="5" strokeLinecap="round" opacity="0.2" />
+						<path d="M56 16 L60 60" stroke="white" strokeWidth="3" strokeLinecap="round" opacity="0.18" />
+						<path d="M28 12 L132 12" stroke="white" strokeWidth="3.5" strokeLinecap="round" opacity="0.28" />
+					</svg>
+				</div>
+
+				<p className="font-serif text-xl font-bold text-[var(--c-brand)]">{activeDrink}</p>
+				<p className="text-xs text-[var(--c-text-dim)]">
+					{fill <= 0 ? "All gone!" : isDrinking ? "Sipping..." : "Tilt left/right to swirl. Tilt toward you to sip."}
+				</p>
+				{fill <= 0 && (
+					<button
+						type="button"
+						onClick={() => setFill(0.75)}
+						className="rounded-full border border-[var(--c-border)] px-4 py-2 text-xs font-semibold text-[var(--c-text-mid)] transition hover:bg-[var(--c-muted)]"
+					>
+						Refill
+					</button>
+				)}
+			</div>
+
+			{/* Drink picker */}
+			<div className="border-t border-[var(--c-border)] px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-4">
+				<p className="mb-3 text-center text-[10px] font-semibold uppercase tracking-widest text-[var(--c-text-dim)]">Pick a drink</p>
+				<div className="flex flex-wrap justify-center gap-2">
+					{drinks.filter((d) => d !== "No drink").map((d) => (
+						<button
+							key={d}
+							type="button"
+							onClick={() => setActiveDrink(d)}
+							className={cx(
+								"rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+								activeDrink === d
+									? "border-[var(--c-brand)] bg-[var(--c-brand)] text-white"
+									: "border-[var(--c-border)] text-[var(--c-text-muted)] hover:bg-[var(--c-muted)]",
+							)}
+						>
+							{d}
+						</button>
+					))}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function DrinkInfoSheet({ drink, onClose }: { drink: Drink; onClose: () => void }) {
+	const info = drinkInfo[drink];
+	const [dragY, setDragY] = useState(0);
+	const dragStart = useState<number | null>(null);
+
+	function handleTouchStart(e: React.TouchEvent) {
+		dragStart[1](e.touches[0].clientY);
+		setDragY(0);
+	}
+	function handleTouchMove(e: React.TouchEvent) {
+		if (dragStart[0] === null) return;
+		const delta = e.touches[0].clientY - dragStart[0];
+		if (delta > 0) setDragY(delta);
+	}
+	function handleTouchEnd() {
+		if (dragY > 80) onClose();
+		else setDragY(0);
+		dragStart[1](null);
+	}
+
+	if (!info) return null;
+	return (
+		<div className="fixed inset-0 z-40 flex items-end overscroll-none bg-[var(--c-text)]/10 p-0 sm:items-center sm:justify-center sm:p-4">
+			<button className="absolute inset-0 cursor-default bg-[var(--c-text)]/30 [touch-action:none]" onClick={onClose} type="button" aria-label="Close" />
+			<section
+				className="no-scrollbar relative z-10 flex h-[88svh] w-full flex-col overflow-y-auto rounded-t-3xl bg-[var(--c-card)] overscroll-contain shadow-2xl sm:h-auto sm:max-h-[88svh] sm:max-w-lg sm:rounded-2xl"
+				style={{ transform: dragY > 0 ? `translateY(${dragY}px)` : undefined, transition: dragY === 0 ? "transform 0.25s ease" : "none" }}
+				onTouchStart={handleTouchStart}
+				onTouchMove={handleTouchMove}
+				onTouchEnd={handleTouchEnd}
+			>
+				{/* Handle */}
+				<div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-[var(--c-drag)] sm:hidden" />
+
+				{/* Hero */}
+				<div className="flex flex-col items-center gap-2 bg-[var(--c-accent-bg)] px-6 py-8 text-center">
+					<span className="grid size-16 place-items-center rounded-full bg-[var(--c-card)] text-[var(--c-brand)]">
+						<Coffee size={32} />
+					</span>
+					<h2 className="mt-1 font-serif text-2xl font-bold text-[var(--c-text-dark)]">{drink}</h2>
+					<p className="text-sm text-[var(--c-text-muted)]">{info.tagline}</p>
+				</div>
+
+				<div className="grid gap-5 px-4 py-5 sm:px-6">
+					{/* Nutrition */}
+					<div>
+						<h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--c-brand-lt)]">Nutrition per cup</h3>
+						<div className="grid grid-cols-2 gap-2">
+							{info.nutrition.map((n) => (
+								<div key={n.label} className="rounded-xl bg-[var(--c-row)] px-3 py-2.5">
+									<p className="text-[11px] text-[var(--c-text-dim)]">{n.label}</p>
+									<p className="mt-0.5 text-sm font-semibold text-[var(--c-text-dark)]">{n.value}</p>
+								</div>
+							))}
+						</div>
+					</div>
+
+					{/* Pros */}
+					<div>
+						<h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--c-brand-lt)]">Pros</h3>
+						<ul className="grid gap-1.5">
+							{info.pros.map((p) => (
+								<li key={p} className="flex items-start gap-2 text-sm text-[var(--c-text)]">
+									<Check size={13} className="mt-0.5 shrink-0 text-green-600" />
+									{p}
+								</li>
+							))}
+						</ul>
+					</div>
+
+					{/* Cons */}
+					<div>
+						<h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--c-brand-lt)]">Cons</h3>
+						<ul className="grid gap-1.5">
+							{info.cons.map((c) => (
+								<li key={c} className="flex items-start gap-2 text-sm text-[var(--c-text)]">
+									<XIcon size={13} className="mt-0.5 shrink-0 text-[var(--c-text-err)]" />
+									{c}
+								</li>
+							))}
+						</ul>
+					</div>
+				</div>
+			</section>
 		</div>
 	);
 }
@@ -1932,43 +2798,59 @@ function PollDetailsSheet({
 	onClose: () => void;
 }) {
 	const [sourceFilter, setSourceFilter] = useState<PollSource | "all">("all");
+	const [dragY, setDragY] = useState(0);
+	const dragStart = useState<number | null>(null);
 	const periodInfo = periodDetails.find((item) => item.id === period);
 	const filteredPolls =
 		sourceFilter === "all"
 			? polls
 			: polls.filter((item) => item.sources[period] === sourceFilter);
+
+	function handleTouchStart(e: React.TouchEvent) {
+		dragStart[1](e.touches[0].clientY);
+		setDragY(0);
+	}
+	function handleTouchMove(e: React.TouchEvent) {
+		if (dragStart[0] === null) return;
+		const delta = e.touches[0].clientY - dragStart[0];
+		if (delta > 0) setDragY(delta);
+	}
+	function handleTouchEnd() {
+		if (dragY > 80) onClose();
+		else setDragY(0);
+		dragStart[1](null);
+	}
+
 	return (
-		<div className="fixed inset-0 z-30 flex items-end overscroll-none bg-[#2d2925]/10 p-0 sm:items-center sm:justify-center sm:p-4">
+		<div className="fixed inset-0 z-30 flex items-end overscroll-none bg-[var(--c-text)]/10 p-0 sm:items-center sm:justify-center sm:p-4">
 			<button
-				className="absolute inset-0 cursor-default bg-[#2d2925]/30 [touch-action:none]"
+				className="absolute inset-0 cursor-default bg-[var(--c-text)]/30 [touch-action:none]"
 				onClick={onClose}
 				type="button"
 				aria-label="Close poll details"
 			/>
-			<section className="relative z-10 flex max-h-[88svh] min-h-0 w-full flex-col rounded-t-3xl bg-[#fffdf9] px-4 pb-6 pt-3 shadow-2xl overscroll-contain sm:max-w-lg sm:rounded-2xl sm:p-6">
-				<div className="mx-auto mb-4 h-1 w-10 shrink-0 rounded-full bg-[#ddd3c7] sm:hidden" />
-				<div className="shrink-0 border-b border-[#eee8df] pb-4">
+			<section
+				className="relative z-10 flex h-[88svh] min-h-0 w-full flex-col rounded-t-3xl bg-[var(--c-card)] px-4 pb-6 pt-3 shadow-2xl overscroll-contain sm:h-auto sm:max-h-[88svh] sm:max-w-lg sm:rounded-2xl sm:p-6"
+				style={{ transform: dragY > 0 ? `translateY(${dragY}px)` : undefined, transition: dragY === 0 ? "transform 0.25s ease" : "none" }}
+				onTouchStart={handleTouchStart}
+				onTouchMove={handleTouchMove}
+				onTouchEnd={handleTouchEnd}
+			>
+				<div className="mx-auto mb-4 h-1 w-10 shrink-0 rounded-full bg-[var(--c-drag)] sm:hidden" />
+				<div className="shrink-0 border-b border-[var(--c-border-2)] pb-4">
 					<div className="flex items-start justify-between">
 						<div>
-							<p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#a36f43]">
+							<p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--c-brand-lt)]">
 								{date === todayKey ? "Today" : displayDate(date)}
 							</p>
-							<h2 className="mt-1 font-serif text-2xl text-[#33271f]">
+							<h2 className="mt-1 font-serif text-2xl text-[var(--c-text-dark)]">
 								{periodInfo?.label ?? period}
 							</h2>
-							<p className="mt-1 text-sm text-[#9a9084]">
+							<p className="mt-1 text-sm text-[var(--c-text-dim)]">
 								{filteredPolls.length}{" "}
 								{filteredPolls.length === 1 ? "response" : "responses"}
 							</p>
 						</div>
-						<button
-							className="grid size-9 place-items-center rounded-full bg-[#f1ede6] text-[#887f74]"
-							onClick={onClose}
-							type="button"
-							aria-label="Close poll details"
-						>
-							<X size={18} />
-						</button>
 					</div>
 					<div className="mt-4 grid grid-cols-4 gap-2">
 						{sourceFilters.map((filter) => (
@@ -1979,8 +2861,8 @@ function PollDetailsSheet({
 								className={cx(
 									"min-h-9 rounded-lg border px-2 text-xs font-semibold capitalize transition",
 									sourceFilter === filter
-										? "border-[#5a3c26] bg-[#5a3c26] text-white"
-										: "border-[#e6e0d6] text-[#887f74] hover:bg-[#f1ede6]",
+										? "border-[var(--c-brand)] bg-[var(--c-brand)] text-white"
+										: "border-[var(--c-border)] text-[var(--c-text-muted)] hover:bg-[var(--c-muted)]",
 								)}
 							>
 								{filter === "all" ? "All" : sourceLabel(filter)}
@@ -1988,7 +2870,7 @@ function PollDetailsSheet({
 						))}
 					</div>
 				</div>
-				<div className="mt-5 min-h-0 flex-1 grid gap-5 overflow-y-auto overscroll-contain pr-1 [touch-action:pan-y]">
+				<div className="no-scrollbar mt-4 min-h-0 flex-1 grid content-start gap-4 overflow-y-auto overscroll-contain [touch-action:pan-y]">
 					{drinks.map((drink) => {
 						const drinkPolls = filteredPolls.filter(
 							(item) => item.choices[period] === drink,
@@ -1999,9 +2881,9 @@ function PollDetailsSheet({
 						if (!drinkPolls.length) return null;
 						return (
 							<section key={drink}>
-								<h3 className="mb-2 flex items-center gap-2 text-base font-semibold text-[#5a3c26]">
+								<h3 className="mb-2 flex items-center gap-2 text-base font-semibold text-[var(--c-brand)]">
 									{drink}
-									<span className="text-sm font-semibold text-[#9a9084]">
+									<span className="text-sm font-semibold text-[var(--c-text-dim)]">
 										{drinkPolls.length}
 										{sugarFreeCount ? ` (${sugarFreeCount} SF)` : ""}
 									</span>
@@ -2009,11 +2891,11 @@ function PollDetailsSheet({
 								<div className="grid gap-2">
 									{drinkPolls.map((item) => (
 										<div
-											className="flex items-center justify-between gap-3 rounded-xl bg-[#f8f5f0] px-3 py-2.5"
+											className="flex items-center justify-between gap-3 rounded-xl bg-[var(--c-row)] px-3 py-2.5"
 											key={item.user.email}
 										>
 											<div className="flex min-w-0 items-center gap-2.5">
-												<span className="grid size-8 shrink-0 place-items-center rounded-full bg-[#eee1d1] text-[11px] font-semibold text-[#68452e]">
+												<span className="grid size-8 shrink-0 place-items-center rounded-full bg-[var(--c-avatar)] text-[11px] font-semibold text-[var(--c-text-mid)]">
 													{initials(compactName(item.user))}
 												</span>
 												<span className="truncate text-sm font-semibold">

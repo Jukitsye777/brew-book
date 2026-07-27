@@ -1,0 +1,1 @@
+ALTER TABLE "user" ADD COLUMN "is_on_leave" boolean DEFAULT false NOT NULL;
