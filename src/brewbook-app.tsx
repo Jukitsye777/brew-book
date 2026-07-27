@@ -344,6 +344,20 @@ function App() {
 	const { dark, toggle: toggleTheme } = useTheme();
 	const [state, setState] = useState<AppState>(readState);
 	const [view, setView] = useState<View>("today");
+	const [pianoMode, setPianoMode] = useState(false);
+	const pollTapCount = useRef(0);
+	const pollTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	function handlePollTabClick() {
+		setView("today");
+		if (pollTapTimer.current) clearTimeout(pollTapTimer.current);
+		pollTapCount.current += 1;
+		if (pollTapCount.current >= 3) {
+			pollTapCount.current = 0;
+			setPianoMode((m) => !m);
+			return;
+		}
+		pollTapTimer.current = setTimeout(() => { pollTapCount.current = 0; }, 2500);
+	}
 	const [historyDate, setHistoryDate] = useState(todayKey);
 	const [historyLoading, setHistoryLoading] = useState(false);
 	const [openPoll, setOpenPoll] = useState<OpenPoll>(null);
@@ -355,6 +369,63 @@ function App() {
 			if (next >= 5) { setEggOpen(true); return 0; }
 			return next;
 		});
+	}
+	const [, setNameTaps] = useState(0);
+	const nameTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	function tapName() {
+		setNameTaps((n) => {
+			const next = n + 1;
+			if (nameTapTimer.current) clearTimeout(nameTapTimer.current);
+			if (next >= 5) {
+				launchConfetti();
+				return 0;
+			}
+			nameTapTimer.current = setTimeout(() => setNameTaps(0), 1500);
+			return next;
+		});
+	}
+	function launchConfetti() {
+		const canvas = document.createElement("canvas");
+		canvas.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:9999";
+		canvas.width = window.innerWidth;
+		canvas.height = window.innerHeight;
+		document.body.appendChild(canvas);
+		const ctx = canvas.getContext("2d")!;
+		const colors = ["#a06840","#d09060","#5a3c26","#c8956a","#f0e6d8","#68452e","#b87848"];
+		const pieces = Array.from({ length: 120 }, () => ({
+			x: Math.random() * canvas.width,
+			y: -10 - Math.random() * 100,
+			vx: (Math.random() - 0.5) * 6,
+			vy: 3 + Math.random() * 4,
+			rot: Math.random() * Math.PI * 2,
+			rotV: (Math.random() - 0.5) * 0.3,
+			w: 8 + Math.random() * 8,
+			h: 4 + Math.random() * 4,
+			color: colors[Math.floor(Math.random() * colors.length)],
+			alpha: 1,
+		}));
+		let raf = 0;
+		function draw() {
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+			let alive = false;
+			for (const p of pieces) {
+				p.x += p.vx; p.y += p.vy; p.vy += 0.12;
+				p.rot += p.rotV;
+				if (p.y > canvas.height + 20) continue;
+				if (p.y > canvas.height * 0.7) p.alpha = Math.max(0, p.alpha - 0.03);
+				alive = true;
+				ctx.save();
+				ctx.globalAlpha = p.alpha;
+				ctx.translate(p.x, p.y);
+				ctx.rotate(p.rot);
+				ctx.fillStyle = p.color;
+				ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+				ctx.restore();
+			}
+			if (alive) { raf = requestAnimationFrame(draw); }
+			else { cancelAnimationFrame(raf); canvas.remove(); }
+		}
+		raf = requestAnimationFrame(draw);
 	}
 	const [error, setError] = useState<string | null>(null);
 	const [profileReady, setProfileReady] = useState(false);
@@ -882,9 +953,11 @@ function App() {
 			<main
 				className={cx(
 					"min-h-svh bg-[var(--c-page)] text-[var(--c-text)] lg:pb-0",
-					!isGuest && "pb-20",
 				)}
-				style={{ paddingTop: "calc(57px + env(safe-area-inset-top))" }}
+				style={{
+					paddingTop: "calc(57px + env(safe-area-inset-top))",
+					paddingBottom: isGuest ? undefined : "calc(5rem + env(safe-area-inset-bottom))",
+				}}
 			>
 				<header className="fixed inset-x-0 top-0 z-10 border-b border-[var(--c-border)] bg-[var(--c-card)]/95 backdrop-blur" style={{ paddingTop: "env(safe-area-inset-top)" }}>
 					<div className="mx-auto flex max-w-[1180px] items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8">
@@ -895,7 +968,7 @@ function App() {
 						</span>
 					</button>
 						<button
-							onClick={() => setView("profile")}
+							onClick={tapName}
 							type="button"
 							aria-label="Open profile"
 							className="text-sm font-semibold text-[var(--c-text-mid)] transition hover:text-[var(--c-brand)]"
@@ -926,6 +999,8 @@ function App() {
 								admin={state.user.role === "admin"}
 								view={view}
 								setView={setView}
+								onPollClick={handlePollTabClick}
+								pianoOn={pianoMode}
 							/>
 						</aside>
 					)}
@@ -942,6 +1017,7 @@ function App() {
 								isOnLeave={state.user.isOnLeave ?? false}
 								onToggleLeave={toggleLeave}
 								leaveLoading={leaveLoading}
+								pianoMode={pianoMode}
 							/>
 						)}
 						{view === "stats" && !isGuest && (
@@ -977,6 +1053,8 @@ function App() {
 							admin={state.user.role === "admin"}
 							view={view}
 							setView={setView}
+							onPollClick={handlePollTabClick}
+							pianoOn={pianoMode}
 							mobile
 						/>
 					</div>
@@ -1327,11 +1405,15 @@ function Nav({
 	setView,
 	admin = false,
 	mobile = false,
+	onPollClick,
+	pianoOn = false,
 }: {
 	view: View;
 	setView: (view: View) => void;
 	admin?: boolean;
 	mobile?: boolean;
+	onPollClick?: () => void;
+	pianoOn?: boolean;
 }) {
 	const items: Array<{ id: View; label: string; icon: React.ReactNode; iconActive: React.ReactNode }> = [
 		{ id: "today", label: "Poll", icon: <Coffee size={22} />, iconActive: <Coffee size={22} strokeWidth={2.5} /> },
@@ -1357,18 +1439,21 @@ function Nav({
 					return (
 						<button
 							key={item.id}
-							onClick={() => setView(item.id)}
+							onClick={() => item.id === "today" && onPollClick ? onPollClick() : setView(item.id)}
 							type="button"
 							className="relative flex flex-col items-center gap-0.5 pb-2 pt-3 transition-colors"
 						>
 							{active && (
 								<span className="absolute inset-x-4 top-0 h-[2px] rounded-b-full bg-[var(--c-brand)]" />
 							)}
-							<span className={cx("transition-colors", active ? "text-[var(--c-brand)]" : "text-[var(--c-text-dim)]")}>
+							<span className={cx("relative transition-colors", active ? "text-[var(--c-brand)]" : "text-[var(--c-text-dim)]")}>
 								{active ? item.iconActive : item.icon}
+								{item.id === "today" && pianoOn && (
+									<span className="absolute -top-1 -right-1 size-2 rounded-full bg-green-400 animate-pulse" />
+								)}
 							</span>
 							<span className={cx("text-[10px] font-semibold tracking-wide transition-colors", active ? "text-[var(--c-brand)]" : "text-[var(--c-text-dim)]")}>
-								{item.label}
+								{item.id === "today" && pianoOn ? "🎹" : item.label}
 							</span>
 						</button>
 					);
@@ -1382,7 +1467,7 @@ function Nav({
 			{items.map((item) => (
 				<button
 					key={item.id}
-					onClick={() => setView(item.id)}
+					onClick={() => item.id === "today" && onPollClick ? onPollClick() : setView(item.id)}
 					type="button"
 					className={cx(
 						"flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-semibold transition lg:flex-row lg:justify-start lg:gap-2 lg:px-3 lg:text-sm",
@@ -1467,6 +1552,9 @@ function ProfileView({
 }) {
 	const [defaultsOpen, setDefaultsOpen] = useState(false);
 	const [historyOpen, setHistoryOpen] = useState(false);
+	function tapAvatar() {
+		window.open("https://www.youtube.com/watch?v=xvFZjo5PgG0", "_blank");
+	}
 	return (
 		<div className="grid gap-3">
 			<PageHeader eyebrow="Account" title="Profile" />
@@ -1474,9 +1562,13 @@ function ProfileView({
 			{/* User card */}
 			<section className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] shadow-[0_8px_30px_rgba(77,57,38,0.04)]">
 				<div className="flex items-center gap-4 p-4">
-					<span className="grid size-14 shrink-0 place-items-center rounded-full bg-[var(--c-brand-pale)] text-lg font-semibold text-[var(--c-brand)]">
+					<button
+						type="button"
+						onClick={tapAvatar}
+						className="grid size-14 shrink-0 place-items-center rounded-full bg-[var(--c-brand-pale)] text-lg font-semibold text-[var(--c-brand)]"
+					>
 						{initials(user.name)}
-					</span>
+					</button>
 					<div className="min-w-0">
 						<p className="truncate font-semibold text-[var(--c-text-dark)]">{user.name}</p>
 						<p className="truncate text-sm text-[var(--c-text-muted)]">
@@ -1871,6 +1963,7 @@ function TodayView({
 	isOnLeave = false,
 	onToggleLeave,
 	leaveLoading = false,
+	pianoMode = false,
 }: {
 	entry: DrinkChoice;
 	sugar: SugarChoice;
@@ -1882,6 +1975,7 @@ function TodayView({
 	isOnLeave?: boolean;
 	onToggleLeave?: () => void;
 	leaveLoading?: boolean;
+	pianoMode?: boolean;
 }) {
 	// IST time for cutoff checks
 	const [nowIST, setNowIST] = useState(() => {
@@ -1926,12 +2020,37 @@ function TodayView({
 
 	const isPeriodClosed = (id: Period) => (id === "morning" ? morningClosed : eveningClosed);
 
+	// Twinkle Twinkle Little Star — C C G G A A G, F F E E D D C, ...
+	const TWINKLE = [261.63,261.63,392.0,392.0,440.0,440.0,392.0,349.23,349.23,329.63,329.63,293.66,293.66,261.63];
+	const pianoNoteIdx = useRef(0);
+	const audioCtxRef = useRef<AudioContext | null>(null);
+	function playPianoNote() {
+		if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+		const ctx = audioCtxRef.current;
+		const osc = ctx.createOscillator();
+		const gain = ctx.createGain();
+		osc.connect(gain);
+		gain.connect(ctx.destination);
+		osc.type = "triangle";
+		osc.frequency.value = TWINKLE[pianoNoteIdx.current % TWINKLE.length];
+		pianoNoteIdx.current += 1;
+		gain.gain.setValueAtTime(0.5, ctx.currentTime);
+		gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+		osc.start(ctx.currentTime);
+		osc.stop(ctx.currentTime + 0.5);
+	}
+
+	function pianoSelect(period: Period, drink: Drink) {
+		playPianoNote();
+		updateEntry(period, drink);
+	}
+
 	return (
 		<div className="grid gap-5">
 			<PageHeader
 				eyebrow={displayDate(todayKey)}
-				title="Today"
-				action={`${todayPolls.length} people`}
+				title={pianoMode ? "🎹 Piano Mode" : "Today"}
+				action={pianoMode ? "tap to play" : `${todayPolls.length} people`}
 			/>
 			{!guest && (
 				<button
@@ -1974,7 +2093,7 @@ function TodayView({
 							selected={entry[period.id]}
 							sugar={sugar[period.id]}
 							editable={!isPeriodClosed(period.id)}
-							onSelect={isPeriodClosed(period.id) ? undefined : (drink) => updateEntry(period.id, drink)}
+							onSelect={isPeriodClosed(period.id) ? undefined : (drink) => (pianoMode ? pianoSelect(period.id, drink) : updateEntry(period.id, drink))}
 							onToggleSugar={isPeriodClosed(period.id) ? undefined : (next) => updateSugar(period.id, next)}
 							onOpen={guest || isPeriodClosed(period.id) ? undefined : () => onOpen(period.id)}
 						/>
@@ -2674,7 +2793,7 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 	// Permission-first screen
 	if (permission !== "granted") {
 		return (
-			<div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-[var(--c-page)] px-8 text-center">
+			<div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-[var(--c-page)] px-8 text-center" style={{ paddingTop: "env(safe-area-inset-top)" }}>
 				<button type="button" onClick={onClose} className="absolute right-5 top-5 text-sm font-semibold text-[var(--c-text-muted)] transition hover:text-[var(--c-brand)]">
 					Close
 				</button>
@@ -2704,7 +2823,7 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 	const drinkHex = drinkColors[activeDrink] ?? "#a36f43";
 
 	return (
-		<div className="fixed inset-0 z-50 flex flex-col bg-[var(--c-page)]">
+		<div className="fixed inset-0 z-50 flex flex-col bg-[var(--c-page)]" style={{ paddingTop: "env(safe-area-inset-top)" }}>
 			{/* SVG defs for metaball filter */}
 			<svg width="0" height="0" className="absolute">
 				<defs>
