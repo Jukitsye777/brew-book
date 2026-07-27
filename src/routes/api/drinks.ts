@@ -1,4 +1,4 @@
-import { and, eq, gt, sql } from 'drizzle-orm'
+import { and, eq, gt, inArray } from 'drizzle-orm'
 import { createFileRoute } from '@tanstack/react-router'
 
 import { db } from '#/db'
@@ -82,15 +82,34 @@ export async function readDay(userId: string | undefined, date: string) {
   })) }
 }
 
-async function ensureTodayResponse(userId: string, date: string, defaults: DrinkChoice, sugarDefaults: SugarChoice) {
+export async function ensureTodayResponses(companyId: string, date: string) {
   if (date !== todayKey()) return
-  await db.insert(drinkResponse).values(periods.map((period) => ({
-    id: crypto.randomUUID(), userId, date, period, drink: defaults[period], sugar: sugarDefaults[period], source: 'default' as const,
-  }))).onConflictDoUpdate({
-    target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period],
-    set: { drink: sql`excluded.drink`, sugar: sql`excluded.sugar`, updatedAt: new Date() },
-    where: eq(drinkResponse.source, 'default'),
-  })
+
+  const members = await db.select({ id: user.id, isGuest: user.isGuest, guestStatus: user.guestStatus }).from(user).where(eq(user.companyId, companyId))
+  const eligibleMembers = members.filter((member) => !member.isGuest || member.guestStatus === 'approved')
+  if (!eligibleMembers.length) return
+
+  const memberIds = eligibleMembers.map((member) => member.id)
+  const defaultRows = await db.select({ userId: drinkDefault.userId, period: drinkDefault.period, drink: drinkDefault.drink, sugar: drinkDefault.sugar }).from(drinkDefault).where(inArray(drinkDefault.userId, memberIds))
+  const defaultsByUser = new Map<string, Partial<Record<Period, { drink: Drink; sugar: boolean }>>>()
+  for (const row of defaultRows) {
+    const defaults = defaultsByUser.get(row.userId) ?? {}
+    defaults[row.period] = { drink: row.drink, sugar: row.sugar }
+    defaultsByUser.set(row.userId, defaults)
+  }
+
+  await db.insert(drinkResponse).values(eligibleMembers.flatMap((member) => periods.map((period) => {
+    const preference = defaultsByUser.get(member.id)?.[period]
+    return {
+      id: crypto.randomUUID(),
+      userId: member.id,
+      date,
+      period,
+      drink: preference?.drink ?? 'No drink',
+      sugar: preference?.sugar ?? true,
+      source: 'default' as const,
+    }
+  }))).onConflictDoNothing({ target: [drinkResponse.userId, drinkResponse.date, drinkResponse.period] })
 }
 
 export const Route = createFileRoute('/api/drinks')({
@@ -101,8 +120,11 @@ export const Route = createFileRoute('/api/drinks')({
         if (!currentUser) return json({ error: 'Unauthorized' }, { status: 401 })
         const requestedDate = new URL(request.url).searchParams.get('date')
         if (!isDate(requestedDate)) return json({ error: 'A valid date is required' }, { status: 400 })
+        const currentUserCompany = await db.select({ companyId: user.companyId }).from(user).where(eq(user.id, currentUser.id)).limit(1)
+        const companyId = currentUserCompany[0]?.companyId
+        if (!companyId) return json({ error: 'Your account is not assigned to a company' }, { status: 403 })
         const beforeEnsure = await readDay(currentUser.id, requestedDate)
-        await ensureTodayResponse(currentUser.id, requestedDate, beforeEnsure.defaults, beforeEnsure.sugarDefaults)
+        await ensureTodayResponses(companyId, requestedDate)
         const day = requestedDate === todayKey() ? await readDay(currentUser.id, requestedDate) : beforeEnsure
         return json({ date: requestedDate, ...day })
       },
