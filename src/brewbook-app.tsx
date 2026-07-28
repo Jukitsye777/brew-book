@@ -355,14 +355,15 @@ function urlBase64ToUint8Array(base64String: string) {
 }
 
 function usePushNotifications(userId: string | undefined) {
-	const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(() => {
-		if (typeof window === 'undefined' || typeof Notification === 'undefined') return 'unsupported'
-		return Notification.permission
-	})
-	const [dismissed, setDismissed] = useState(() => {
-		if (typeof window === 'undefined') return false
-		return localStorage.getItem('push-dismissed') === '1'
-	})
+	const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('unsupported')
+	const [dismissed, setDismissed] = useState(false)
+
+	useEffect(() => {
+		if (typeof Notification !== 'undefined') {
+			setPermission(Notification.permission)
+		}
+		setDismissed(localStorage.getItem('push-dismissed') === '1')
+	}, [])
 
 	async function subscribe() {
 		if (!VAPID_PUBLIC_KEY || !userId) return
@@ -1649,6 +1650,7 @@ function ProfileView({
 	setHistoryDate,
 	historyPolls,
 	historyLoading,
+	push,
 }: {
 	user: User;
 	defaults: DrinkChoice;
