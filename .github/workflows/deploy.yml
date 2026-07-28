@@ -1,10 +1,5 @@
 name: Deploy BrewBook
 
-on:
-  push:
-    branches:
-      - main
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -124,14 +119,41 @@ jobs:
           source: docker-compose.yml
           target: /var/www/brew-book
 
-      - name: Upload systemd units
+      - name: Upload morning service unit
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: deploy
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: deploy/systemd
-          target: /var/www/brew-book/deploy
+          source: deploy/systemd/brew-book-push-morning.service
+          target: /var/www/brew-book/deploy/systemd
+
+      - name: Upload morning timer unit
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: deploy
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: deploy/systemd/brew-book-push-morning.timer
+          target: /var/www/brew-book/deploy/systemd
+
+      - name: Upload evening service unit
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: deploy
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: deploy/systemd/brew-book-push-evening.service
+          target: /var/www/brew-book/deploy/systemd
+
+      - name: Upload evening timer unit
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: deploy
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: deploy/systemd/brew-book-push-evening.timer
+          target: /var/www/brew-book/deploy/systemd
 
       - name: Pull and restart BrewBook
         uses: appleboy/ssh-action@v1.0.3
