@@ -130,8 +130,8 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: deploy
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: deploy/systemd/*
-          target: /var/www/brew-book/deploy/systemd
+          source: deploy/systemd
+          target: /var/www/brew-book/deploy
 
       - name: Pull and restart BrewBook
         uses: appleboy/ssh-action@v1.0.3
