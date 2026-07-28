@@ -5,6 +5,9 @@ on:
     - cron: '*/5 * * * *'  # every 5 minutes (for testing — change to morning/evening times for prod)
   workflow_dispatch:        # manual trigger from GitHub UI
 
+env:
+  NODE_ENV: production
+  
 jobs:
   send:
     runs-on: ubuntu-latest
@@ -51,9 +54,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
           NODE_EXTRA_CA_CERTS: certs/do-ca-certificate.crt
-          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-          VAPID_EMAIL: ${{ secrets.VAPID_EMAIL }}
+          DOTENV_PRIVATE_KEY_PRODUCTION: ${{ secrets.DOTENV_PRIVATE_KEY_PRODUCTION }}
 
       - name: Revoke GitHub Actions IP from DigitalOcean
         if: always()
