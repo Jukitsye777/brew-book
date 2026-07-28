@@ -58,13 +58,11 @@ async function run() {
     const drink = defaultsByUser.get(sub.id) ?? 'Tea'
     const message = getGreeting(subscriber.name, drink, null)
 
-    const periodLabel = period === 'morning' ? 'Morning' : 'Evening'
-
     try {
       await webpush.sendNotification(
         JSON.parse(sub.pushSubscription),
         JSON.stringify({
-          title: `MyBev — ${periodLabel} ☕`,
+          title: 'MyBev',
           body: message,
           url: '/',
         })

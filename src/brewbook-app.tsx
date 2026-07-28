@@ -356,10 +356,13 @@ function urlBase64ToUint8Array(base64String: string) {
 
 function usePushNotifications(userId: string | undefined) {
 	const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(() => {
-		if (typeof Notification === 'undefined') return 'unsupported'
+		if (typeof window === 'undefined' || typeof Notification === 'undefined') return 'unsupported'
 		return Notification.permission
 	})
-	const [dismissed, setDismissed] = useState(() => localStorage.getItem('push-dismissed') === '1')
+	const [dismissed, setDismissed] = useState(() => {
+		if (typeof window === 'undefined') return false
+		return localStorage.getItem('push-dismissed') === '1'
+	})
 
 	async function subscribe() {
 		if (!VAPID_PUBLIC_KEY || !userId) return
@@ -1146,6 +1149,7 @@ function App() {
 								setHistoryDate={setHistoryDate}
 								historyPolls={historyPolls}
 								historyLoading={historyLoading}
+								push={push}
 							/>
 						)}
 						{view === "admin" && (
@@ -1658,9 +1662,12 @@ function ProfileView({
 	setHistoryDate: (d: string) => void;
 	historyPolls: PollRecord[];
 	historyLoading: boolean;
+	push: ReturnType<typeof usePushNotifications>;
 }) {
 	const [defaultsOpen, setDefaultsOpen] = useState(false);
 	const [historyOpen, setHistoryOpen] = useState(false);
+	const notifEnabled = push.permission === 'granted'
+	const notifUnsupported = push.permission === 'unsupported' || push.permission === 'denied'
 	function tapAvatar() {
 		window.open("https://www.youtube.com/watch?v=xvFZjo5PgG0", "_blank");
 	}
@@ -1709,6 +1716,31 @@ function ProfileView({
 							/>
 						</button>
 					</div>
+
+					{/* Notifications row */}
+					{!notifUnsupported && !isGuest && (
+						<div className="flex items-center justify-between border-t border-[var(--c-border)] px-4 py-3.5">
+							<span className="flex items-center gap-2.5 text-sm font-semibold text-[var(--c-text-mid)]">
+								<Bell size={15} />
+								Drink reminders
+							</span>
+							<button
+								type="button"
+								onClick={() => notifEnabled ? void push.unsubscribe() : void push.subscribe()}
+								aria-label="Toggle notifications"
+								aria-pressed={notifEnabled}
+								className="relative h-6 w-11 rounded-full transition-colors duration-200"
+								style={{ background: notifEnabled ? 'var(--c-brand)' : 'var(--c-toggle-off)' }}
+							>
+								<span
+									className={cx(
+										'absolute top-1 size-4 rounded-full bg-[var(--c-cream)] shadow transition-all duration-200',
+										notifEnabled ? 'left-6' : 'left-1',
+									)}
+								/>
+							</button>
+						</div>
+					)}
 
 					{/* Drink defaults row */}
 					{!isGuest && (
@@ -1802,18 +1834,19 @@ function ProfileView({
 }
 
 function AuthLoading({
-	message = pickRandom(brewingMessages),
+	message,
 }: {
 	message?: string;
 }) {
+	const [msg] = useState(() => message ?? pickRandom(brewingMessages))
 	return (
 		<main className="grid min-h-svh place-items-center bg-[var(--c-page)]">
 			<div className="flex flex-col items-center gap-4">
 				<output
-					aria-label={message}
+					aria-label={msg}
 					className="size-10 animate-spin rounded-full border-2 border-[var(--c-border)] border-t-[var(--c-brand)]"
 				/>
-				<p className="text-sm text-[var(--c-text-muted)]">{message}</p>
+				<p className="text-sm text-[var(--c-text-muted)]">{msg}</p>
 			</div>
 		</main>
 	);
