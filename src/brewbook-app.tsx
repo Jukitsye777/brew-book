@@ -17,7 +17,9 @@ import {
 	User as UserIcon,
 	X as XIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { FlipFluid, FluidRenderer, setupFluidScene } from "#/lib/fluid";
 
 import { authClient } from "#/lib/auth-client";
 import {
@@ -447,6 +449,20 @@ function App() {
 	const { dark, toggle: toggleTheme } = useTheme();
 	const [state, setState] = useState<AppState>(readState);
 	const [view, setView] = useState<View>("today");
+	const [pianoMode, setPianoMode] = useState(false);
+	const pollTapCount = useRef(0);
+	const pollTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	function handlePollTabClick() {
+		setView("today");
+		if (pollTapTimer.current) clearTimeout(pollTapTimer.current);
+		pollTapCount.current += 1;
+		if (pollTapCount.current >= 3) {
+			pollTapCount.current = 0;
+			setPianoMode((m) => !m);
+			return;
+		}
+		pollTapTimer.current = setTimeout(() => { pollTapCount.current = 0; }, 2500);
+	}
 	const [historyDate, setHistoryDate] = useState(todayKey);
 	const [historyLoading, setHistoryLoading] = useState(false);
 	const [openPoll, setOpenPoll] = useState<OpenPoll>(null);
@@ -458,6 +474,63 @@ function App() {
 			if (next >= 5) { setEggOpen(true); return 0; }
 			return next;
 		});
+	}
+	const [, setNameTaps] = useState(0);
+	const nameTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	function tapName() {
+		setNameTaps((n) => {
+			const next = n + 1;
+			if (nameTapTimer.current) clearTimeout(nameTapTimer.current);
+			if (next >= 5) {
+				launchConfetti();
+				return 0;
+			}
+			nameTapTimer.current = setTimeout(() => setNameTaps(0), 1500);
+			return next;
+		});
+	}
+	function launchConfetti() {
+		const canvas = document.createElement("canvas");
+		canvas.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:9999";
+		canvas.width = window.innerWidth;
+		canvas.height = window.innerHeight;
+		document.body.appendChild(canvas);
+		const ctx = canvas.getContext("2d")!;
+		const colors = ["#a06840","#d09060","#5a3c26","#c8956a","#f0e6d8","#68452e","#b87848"];
+		const pieces = Array.from({ length: 120 }, () => ({
+			x: Math.random() * canvas.width,
+			y: -10 - Math.random() * 100,
+			vx: (Math.random() - 0.5) * 6,
+			vy: 3 + Math.random() * 4,
+			rot: Math.random() * Math.PI * 2,
+			rotV: (Math.random() - 0.5) * 0.3,
+			w: 8 + Math.random() * 8,
+			h: 4 + Math.random() * 4,
+			color: colors[Math.floor(Math.random() * colors.length)],
+			alpha: 1,
+		}));
+		let raf = 0;
+		function draw() {
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+			let alive = false;
+			for (const p of pieces) {
+				p.x += p.vx; p.y += p.vy; p.vy += 0.12;
+				p.rot += p.rotV;
+				if (p.y > canvas.height + 20) continue;
+				if (p.y > canvas.height * 0.7) p.alpha = Math.max(0, p.alpha - 0.03);
+				alive = true;
+				ctx.save();
+				ctx.globalAlpha = p.alpha;
+				ctx.translate(p.x, p.y);
+				ctx.rotate(p.rot);
+				ctx.fillStyle = p.color;
+				ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+				ctx.restore();
+			}
+			if (alive) { raf = requestAnimationFrame(draw); }
+			else { cancelAnimationFrame(raf); canvas.remove(); }
+		}
+		raf = requestAnimationFrame(draw);
 	}
 	const [error, setError] = useState<string | null>(null);
 	const [profileReady, setProfileReady] = useState(false);
@@ -559,6 +632,10 @@ function App() {
 			return () => {
 				cancelled = true;
 			};
+		}
+		// Replace history so OAuth redirect URL is removed — prevents back-button returning to login
+		if (window.location.search || window.location.pathname !== "/") {
+			window.history.replaceState(null, "", "/");
 		}
 		const user = {
 			id: sessionUserId,
@@ -918,6 +995,13 @@ function App() {
 		}));
 		setLeaveLoading(true);
 		void setLeaveStatus(next)
+			.then(() => getDrinkDay(todayKey))
+			.then((day) => {
+				setState((current) => ({
+					...current,
+					entries: { ...current.entries, [todayKey]: day.responses },
+				}));
+			})
 			.catch(() => {
 				setState((current) => ({
 					...current,
@@ -974,11 +1058,14 @@ function App() {
 		<ErrorBoundary fallback={AppErrorFallback}>
 			<main
 				className={cx(
-					"min-h-svh bg-[var(--c-page)] pt-[57px] text-[var(--c-text)] lg:pb-0",
-					!isGuest && "pb-20",
+					"min-h-svh bg-[var(--c-page)] text-[var(--c-text)] lg:pb-0",
 				)}
+				style={{
+					paddingTop: "calc(57px + env(safe-area-inset-top))",
+					paddingBottom: isGuest ? undefined : "calc(5rem + env(safe-area-inset-bottom))",
+				}}
 			>
-				<header className="fixed inset-x-0 top-0 z-10 border-b border-[var(--c-border)] bg-[var(--c-card)]/95 backdrop-blur">
+				<header className="fixed inset-x-0 top-0 z-10 border-b border-[var(--c-border)] bg-[var(--c-card)]/95 backdrop-blur" style={{ paddingTop: "env(safe-area-inset-top)" }}>
 					<div className="mx-auto flex max-w-[1180px] items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8">
 					<button type="button" onClick={tapLogo} className="flex items-center gap-2.5" aria-label="MyBev logo">
 						<BrandMark />
@@ -987,7 +1074,7 @@ function App() {
 						</span>
 					</button>
 						<button
-							onClick={() => setView("profile")}
+							onClick={tapName}
 							type="button"
 							aria-label="Open profile"
 							className="text-sm font-semibold text-[var(--c-text-mid)] transition hover:text-[var(--c-brand)]"
@@ -1024,6 +1111,8 @@ function App() {
 								admin={state.user.role === "admin"}
 								view={view}
 								setView={setView}
+								onPollClick={handlePollTabClick}
+								pianoOn={pianoMode}
 							/>
 						</aside>
 					)}
@@ -1040,6 +1129,7 @@ function App() {
 								isOnLeave={state.user.isOnLeave ?? false}
 								onToggleLeave={toggleLeave}
 								leaveLoading={leaveLoading}
+								pianoMode={pianoMode}
 							/>
 						)}
 						{view === "stats" && !isGuest && (
@@ -1076,6 +1166,8 @@ function App() {
 							admin={state.user.role === "admin"}
 							view={view}
 							setView={setView}
+							onPollClick={handlePollTabClick}
+							pianoOn={pianoMode}
 							mobile
 						/>
 					</div>
@@ -1426,11 +1518,15 @@ function Nav({
 	setView,
 	admin = false,
 	mobile = false,
+	onPollClick,
+	pianoOn = false,
 }: {
 	view: View;
 	setView: (view: View) => void;
 	admin?: boolean;
 	mobile?: boolean;
+	onPollClick?: () => void;
+	pianoOn?: boolean;
 }) {
 	const items: Array<{ id: View; label: string; icon: React.ReactNode; iconActive: React.ReactNode }> = [
 		{ id: "today", label: "Poll", icon: <Coffee size={22} />, iconActive: <Coffee size={22} strokeWidth={2.5} /> },
@@ -1456,18 +1552,21 @@ function Nav({
 					return (
 						<button
 							key={item.id}
-							onClick={() => setView(item.id)}
+							onClick={() => item.id === "today" && onPollClick ? onPollClick() : setView(item.id)}
 							type="button"
 							className="relative flex flex-col items-center gap-0.5 pb-2 pt-3 transition-colors"
 						>
 							{active && (
 								<span className="absolute inset-x-4 top-0 h-[2px] rounded-b-full bg-[var(--c-brand)]" />
 							)}
-							<span className={cx("transition-colors", active ? "text-[var(--c-brand)]" : "text-[var(--c-text-dim)]")}>
+							<span className={cx("relative transition-colors", active ? "text-[var(--c-brand)]" : "text-[var(--c-text-dim)]")}>
 								{active ? item.iconActive : item.icon}
+								{item.id === "today" && pianoOn && (
+									<span className="absolute -top-1 -right-1 size-2 rounded-full bg-green-400 animate-pulse" />
+								)}
 							</span>
 							<span className={cx("text-[10px] font-semibold tracking-wide transition-colors", active ? "text-[var(--c-brand)]" : "text-[var(--c-text-dim)]")}>
-								{item.label}
+								{item.id === "today" && pianoOn ? "🎹" : item.label}
 							</span>
 						</button>
 					);
@@ -1481,7 +1580,7 @@ function Nav({
 			{items.map((item) => (
 				<button
 					key={item.id}
-					onClick={() => setView(item.id)}
+					onClick={() => item.id === "today" && onPollClick ? onPollClick() : setView(item.id)}
 					type="button"
 					className={cx(
 						"flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-semibold transition lg:flex-row lg:justify-start lg:gap-2 lg:px-3 lg:text-sm",
@@ -1569,6 +1668,9 @@ function ProfileView({
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const notifEnabled = push.permission === 'granted'
 	const notifUnsupported = push.permission === 'unsupported' || push.permission === 'denied'
+	function tapAvatar() {
+		window.open("https://www.youtube.com/watch?v=xvFZjo5PgG0", "_blank");
+	}
 	return (
 		<div className="grid gap-3">
 			<PageHeader eyebrow="Account" title="Profile" />
@@ -1576,9 +1678,13 @@ function ProfileView({
 			{/* User card */}
 			<section className="rounded-2xl border border-[var(--c-border)] bg-[var(--c-card)] shadow-[0_8px_30px_rgba(77,57,38,0.04)]">
 				<div className="flex items-center gap-4 p-4">
-					<span className="grid size-14 shrink-0 place-items-center rounded-full bg-[var(--c-brand-pale)] text-lg font-semibold text-[var(--c-brand)]">
+					<button
+						type="button"
+						onClick={tapAvatar}
+						className="grid size-14 shrink-0 place-items-center rounded-full bg-[var(--c-brand-pale)] text-lg font-semibold text-[var(--c-brand)]"
+					>
 						{initials(user.name)}
-					</span>
+					</button>
 					<div className="min-w-0">
 						<p className="truncate font-semibold text-[var(--c-text-dark)]">{user.name}</p>
 						<p className="truncate text-sm text-[var(--c-text-muted)]">
@@ -1702,6 +1808,16 @@ function ProfileView({
 						)}
 					</>
 
+					{/* Contribute row */}
+					<a
+						href="https://github.com/jojipanackal/brew-book"
+						target="_blank"
+						rel="noopener noreferrer"
+						className="flex w-full items-center gap-2.5 border-t border-[var(--c-border)] px-4 py-3.5 text-sm font-semibold text-[var(--c-text-mid)] transition hover:bg-[var(--c-muted)]"
+					>
+						<svg viewBox="0 0 24 24" fill="currentColor" className="size-4 shrink-0" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.461-1.11-1.461-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.744 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+						Contribute on GitHub
+					</a>
 					{/* Sign out row */}
 					<button
 						onClick={onSignOut}
@@ -1744,6 +1860,12 @@ function SignInPage({
 	onGuest: () => void;
 	onLocalSignUp?: () => void;
 }) {
+	useEffect(() => {
+		const html = document.documentElement;
+		const wasDark = html.classList.contains("dark");
+		html.classList.remove("dark");
+		return () => { if (wasDark) html.classList.add("dark"); };
+	}, []);
 	return (
 		<main className="relative grid min-h-svh place-items-center overflow-hidden bg-[var(--c-page)] px-5 py-10 text-[var(--c-cream)]">
 			<div
@@ -1999,6 +2121,7 @@ function TodayView({
 	isOnLeave = false,
 	onToggleLeave,
 	leaveLoading = false,
+	pianoMode = false,
 }: {
 	entry: DrinkChoice;
 	sugar: SugarChoice;
@@ -2010,13 +2133,82 @@ function TodayView({
 	isOnLeave?: boolean;
 	onToggleLeave?: () => void;
 	leaveLoading?: boolean;
+	pianoMode?: boolean;
 }) {
+	// IST time for cutoff checks
+	const [nowIST, setNowIST] = useState(() => {
+		const d = new Date();
+		const [h, m] = new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).format(d).split(":").map(Number);
+		return h * 60 + m;
+	});
+	useEffect(() => {
+		const id = setInterval(() => {
+			const d = new Date();
+			const [h, m] = new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).format(d).split(":").map(Number);
+			setNowIST(h * 60 + m);
+		}, 30_000);
+		return () => clearInterval(id);
+	}, []);
+
+	const morningClosed = nowIST >= 11 * 60 && nowIST < 12 * 60;   // 11:00–11:59 AM IST
+	const eveningClosed = nowIST >= 15 * 60 + 15 && nowIST < 16 * 60; // 3:15–3:59 PM IST
+
+	const morningClosedMessages = [
+		"No coffee for you! The morning window closed at 11 AM.",
+		"The kettle has gone cold. Morning poll is done.",
+		"You snooze, you lose the morning brew.",
+		"Morning window closed. The beans have moved on.",
+		"Too late for morning, too early for regrets.",
+	];
+	const eveningClosedMessages = [
+		"The evening round is a wrap. Go drink some water.",
+		"Poll closed at 3:15. Your tea waited... it left.",
+		"Evening window shut. Even the chai went home.",
+		"You missed the evening round. Decaf is your punishment.",
+		"Poll o'clock was 3:15. It is now too late o'clock.",
+	];
+
+	function pickRoundRobin(arr: string[], seed: string) {
+		const idx = seed.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % arr.length;
+		return arr[idx];
+	}
+
+	const morningMsg = pickRoundRobin(morningClosedMessages, todayKey + "m");
+	const eveningMsg = pickRoundRobin(eveningClosedMessages, todayKey + "e");
+
+	const isPeriodClosed = (id: Period) => (id === "morning" ? morningClosed : eveningClosed);
+
+	// Twinkle Twinkle Little Star — C C G G A A G, F F E E D D C, ...
+	const TWINKLE = [261.63,261.63,392.0,392.0,440.0,440.0,392.0,349.23,349.23,329.63,329.63,293.66,293.66,261.63];
+	const pianoNoteIdx = useRef(0);
+	const audioCtxRef = useRef<AudioContext | null>(null);
+	function playPianoNote() {
+		if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+		const ctx = audioCtxRef.current;
+		const osc = ctx.createOscillator();
+		const gain = ctx.createGain();
+		osc.connect(gain);
+		gain.connect(ctx.destination);
+		osc.type = "triangle";
+		osc.frequency.value = TWINKLE[pianoNoteIdx.current % TWINKLE.length];
+		pianoNoteIdx.current += 1;
+		gain.gain.setValueAtTime(0.5, ctx.currentTime);
+		gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+		osc.start(ctx.currentTime);
+		osc.stop(ctx.currentTime + 0.5);
+	}
+
+	function pianoSelect(period: Period, drink: Drink) {
+		playPianoNote();
+		updateEntry(period, drink);
+	}
+
 	return (
 		<div className="grid gap-5">
 			<PageHeader
 				eyebrow={displayDate(todayKey)}
-				title="Today"
-				action={`${todayPolls.length} people`}
+				title={pianoMode ? "🎹 Piano Mode" : "Today"}
+				action={pianoMode ? "tap to play" : `${todayPolls.length} people`}
 			/>
 			{!guest && (
 				<button
@@ -2052,17 +2244,28 @@ function TodayView({
 			)}
 			<div className={cx("grid gap-3", isOnLeave && "pointer-events-none opacity-40")}>
 				{periodDetails.map((period) => (
-					<DrinkPoll
-						key={period.id}
-						period={period}
-						polls={todayPolls}
-						selected={entry[period.id]}
-						sugar={sugar[period.id]}
-						editable
-						onSelect={(drink) => updateEntry(period.id, drink)}
-						onToggleSugar={(next) => updateSugar(period.id, next)}
-						onOpen={guest ? undefined : () => onOpen(period.id)}
-					/>
+					<div key={period.id} className="grid gap-0">
+						<DrinkPoll
+							period={period}
+							polls={todayPolls}
+							selected={entry[period.id]}
+							sugar={sugar[period.id]}
+							editable={!isPeriodClosed(period.id)}
+							onSelect={isPeriodClosed(period.id) ? undefined : (drink) => (pianoMode ? pianoSelect(period.id, drink) : updateEntry(period.id, drink))}
+							onToggleSugar={isPeriodClosed(period.id) ? undefined : (next) => updateSugar(period.id, next)}
+							onOpen={guest || isPeriodClosed(period.id) ? undefined : () => onOpen(period.id)}
+						/>
+						{isPeriodClosed(period.id) && (
+							<div className="rounded-b-2xl border border-t-0 border-[var(--c-border)] bg-[var(--c-muted)] px-4 py-3 text-center">
+								<p className="text-sm font-semibold text-[var(--c-text-mid)]">
+									{period.id === "morning" ? morningMsg : eveningMsg}
+								</p>
+								<p className="mt-1 text-xs text-[var(--c-text-muted)]">
+									Need to fix your response? Contact your admin.
+								</p>
+							</div>
+						)}
+					</div>
 				))}
 			</div>
 		</div>
@@ -2178,8 +2381,11 @@ function StatsView() {
 	}, [range]);
 
 	if (fetching && !stats) return (
-		<div className="flex items-center justify-center py-20">
-			<Loader2 size={28} className="animate-spin text-[var(--c-brand-lt)]" />
+		<div className="grid min-h-[50svh] place-items-center">
+			<div className="flex flex-col items-center gap-3">
+				<output aria-label="Loading" className="size-10 animate-spin rounded-full border-2 border-[var(--c-border)] border-t-[var(--c-brand)]" />
+				<p className="text-sm text-[var(--c-text-muted)]">{pickRandom(brewingMessages)}</p>
+			</div>
 		</div>
 	);
 	if (!stats) return null;
@@ -2672,53 +2878,80 @@ function DrinkPoll({
 	);
 }
 
+// Parse a CSS hex color to normalized RGB
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+	const n = parseInt(hex.replace("#", ""), 16);
+	return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
+}
+
 function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 	const [activeDrink, setActiveDrink] = useState<Drink>("Coffee");
 	const { tilt, permission, requestPermission } = useGyroscope();
-	const color = drinkColors[activeDrink] ?? "#a36f43";
 
-	// Fill level: starts full, decreases as user tilts forward to "drink"
-	// beta ~90 = upright; tipping toward face decreases beta; < 45 = drinking gesture
-	const [fill, setFill] = useState(0.75);
-	const drinkingRef = useState<ReturnType<typeof setInterval> | null>(null);
+	const canvasRef = useRef<HTMLCanvasElement>(null);
+	const fluidRef = useRef<FlipFluid | null>(null);
+	const rendererRef = useRef<FluidRenderer | null>(null);
+	const rafRef = useRef<number>(0);
+	const simWidthRef = useRef(3.0);
+	const simHeightRef = useRef(4.0);
+	// Ref so rAF loop always reads latest tilt without stale closure
+	const tiltRef = useRef(tilt);
+	useEffect(() => { tiltRef.current = tilt; }, [tilt]);
 
+	// Init / teardown fluid sim
 	useEffect(() => {
-		const isDrinking = tilt.beta < 45 && activeDrink !== "No drink" && fill > 0;
-		if (isDrinking) {
-			const id = setInterval(() => {
-				setFill((f) => Math.max(0, f - 0.008));
-			}, 50);
-			drinkingRef[1](id);
-			return () => clearInterval(id);
-		}
-		if (drinkingRef[0]) {
-			clearInterval(drinkingRef[0]);
-			drinkingRef[1](null);
-		}
-	}, [tilt.beta, activeDrink]);
+		const canvas = canvasRef.current;
+		if (!canvas || permission !== "granted") return;
 
-	// Reset fill when drink changes
+		const dpr = window.devicePixelRatio || 1;
+		canvas.width = 260 * dpr;
+		canvas.height = 380 * dpr;
+		simWidthRef.current = 2.6;
+		simHeightRef.current = 3.8;
+
+		const color = hexToRgb(drinkColors[activeDrink] ?? "#a36f43");
+		const foam = { r: Math.min(1, color.r + 0.35), g: Math.min(1, color.g + 0.25), b: Math.min(1, color.b + 0.2) };
+
+		fluidRef.current = setupFluidScene(simWidthRef.current, simHeightRef.current, 60, 0.6, 0.75, color, foam, 0.0008, 0.4);
+		rendererRef.current = new FluidRenderer(canvas);
+
+		const dt = 1.0 / 120.0;
+
+		function loop() {
+			const f = fluidRef.current;
+			const r = rendererRef.current;
+			if (!f || !r) return;
+
+			const gx = (tiltRef.current.gamma / 45) * 9.81;
+			const gy = -9.81;
+
+			f.simulate(dt, gx, gy, 0.95, 50, 2, 1.7, true, true, 1.0);
+			r.render(f, { simWidth: simWidthRef.current, simHeight: simHeightRef.current });
+			rafRef.current = requestAnimationFrame(loop);
+		}
+		rafRef.current = requestAnimationFrame(loop);
+
+		return () => {
+			cancelAnimationFrame(rafRef.current);
+			fluidRef.current = null;
+			rendererRef.current = null;
+		};
+	}, [permission]);
+
+	// Update fluid color when drink changes
 	useEffect(() => {
-		setFill(activeDrink === "No drink" ? 0.04 : 0.75);
+		const f = fluidRef.current;
+		if (!f) return;
+		const color = hexToRgb(drinkColors[activeDrink] ?? "#a36f43");
+		const foam = { r: Math.min(1, color.r + 0.35), g: Math.min(1, color.g + 0.25), b: Math.min(1, color.b + 0.2) };
+		f.setFluidColor(color);
+		f.setFoamColor(foam);
 	}, [activeDrink]);
-
-	const fillLevel = activeDrink === "No drink" ? 0.04 : fill;
-	const liquidShift = tilt.gamma * 0.8;
-	const isDrinking = tilt.beta < 45 && fillLevel > 0;
-
-	const bubbles = [
-		{ x: 28, delay: "0s", size: 3 },
-		{ x: 52, delay: "0.5s", size: 2.5 },
-		{ x: 72, delay: "0.9s", size: 4 },
-		{ x: 40, delay: "1.4s", size: 2 },
-		{ x: 64, delay: "0.2s", size: 3 },
-		{ x: 82, delay: "1.1s", size: 2 },
-	];
 
 	// Permission-first screen
 	if (permission !== "granted") {
 		return (
-			<div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-[var(--c-page)] px-8 text-center">
+			<div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-[var(--c-page)] px-8 text-center" style={{ paddingTop: "env(safe-area-inset-top)" }}>
 				<button type="button" onClick={onClose} className="absolute right-5 top-5 text-sm font-semibold text-[var(--c-text-muted)] transition hover:text-[var(--c-brand)]">
 					Close
 				</button>
@@ -2745,8 +2978,24 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 		);
 	}
 
+	const drinkHex = drinkColors[activeDrink] ?? "#a36f43";
+
 	return (
-		<div className="fixed inset-0 z-50 flex flex-col bg-[var(--c-page)]">
+		<div className="fixed inset-0 z-50 flex flex-col bg-[var(--c-page)]" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+			{/* SVG defs for metaball filter */}
+			<svg width="0" height="0" className="absolute">
+				<defs>
+					<filter id="fluid-metaball" x="-20%" y="-20%" width="140%" height="140%" colorInterpolationFilters="sRGB">
+						<feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur" />
+						<feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 28 -10" result="blob" />
+					</filter>
+					<clipPath id="glass-clip" clipPathUnits="objectBoundingBox">
+						{/* trapezoid: top wider, bottom narrower — glass shape */}
+						<polygon points="0.08,0 0.92,0 0.82,1 0.18,1" />
+					</clipPath>
+				</defs>
+			</svg>
+
 			{/* Header */}
 			<div className="flex items-center justify-between border-b border-[var(--c-border)] px-5 py-4">
 				<span className="font-serif text-lg font-bold text-[var(--c-brand)]">Glass Simulator</span>
@@ -2755,64 +3004,48 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 				</button>
 			</div>
 
-			{/* Glass */}
-			<div className="flex flex-1 flex-col items-center justify-center gap-3">
-				<div
-					style={{
-						transform: `rotate(${tilt.gamma * 0.4 + (isDrinking ? 40 : 0)}deg) translateY(${isDrinking ? -15 : 0}px)`,
-						transition: "transform 0.06s linear",
-					}}
-				>
-					<svg width="160" height="240" viewBox="0 0 160 240" fill="none" xmlns="http://www.w3.org/2000/svg">
-						<defs>
-							<clipPath id="egg-glass-clip">
-								<path d="M28 12 L132 12 L118 222 L42 222 Z" />
-							</clipPath>
-						</defs>
-						<g clipPath="url(#egg-glass-clip)">
-							<rect x="-20" y={12 + (1 - fillLevel) * 210} width="200" height="230" fill={color} opacity="0.88" />
-							{fillLevel > 0.05 && (
-								<polygon
-									points={`
-										${-20 + liquidShift - 20},${12 + (1 - fillLevel) * 210 + liquidShift * 0.3}
-										${180 + liquidShift + 20},${12 + (1 - fillLevel) * 210 - liquidShift * 0.3}
-										${180 + liquidShift + 20},${12 + (1 - fillLevel) * 210 - liquidShift * 0.3 - 12}
-										${-20 + liquidShift - 20},${12 + (1 - fillLevel) * 210 + liquidShift * 0.3 - 12}
-									`}
-									fill={color} opacity="0.45"
-								/>
-							)}
-							{fillLevel > 0.05 && bubbles.map((b, i) => (
-								<circle
-									key={i}
-									cx={b.x + liquidShift * 0.25}
-									cy="160"
-									r={b.size}
-									fill="white" opacity="0.3"
-									style={{ animation: `bubble-rise 2.2s ${b.delay} infinite ease-in` }}
-								/>
-							))}
-						</g>
-						<path d="M28 12 L132 12 L118 222 L42 222 Z" stroke="var(--c-border-3)" strokeWidth="3.5" fill="none" strokeLinejoin="round" />
-						<path d="M42 24 L47 188" stroke="white" strokeWidth="5" strokeLinecap="round" opacity="0.2" />
-						<path d="M56 16 L60 60" stroke="white" strokeWidth="3" strokeLinecap="round" opacity="0.18" />
-						<path d="M28 12 L132 12" stroke="white" strokeWidth="3.5" strokeLinecap="round" opacity="0.28" />
+			{/* Glass area */}
+			<div className="flex flex-1 flex-col items-center justify-center gap-4 px-8">
+				<p className="text-sm font-semibold text-[var(--c-text-mid)]">{activeDrink}</p>
+
+				{/* Glass wrapper: fixed proportions, glass clip + metaball */}
+				<div className="relative" style={{ width: 260, height: 380 }}>
+					{/* Glass border SVG overlay */}
+					<svg
+						viewBox="0 0 260 380"
+						width="260" height="380"
+						className="absolute inset-0 z-20 pointer-events-none"
+					>
+						{/* Glass outline */}
+						<polygon
+							points="20,0 240,0 214,380 46,380"
+							fill="none"
+							stroke="var(--c-border-3)"
+							strokeWidth="3"
+							strokeLinejoin="round"
+						/>
+						{/* Highlight */}
+						<line x1="48" y1="12" x2="58" y2="345" stroke="white" strokeWidth="4" strokeLinecap="round" opacity="0.18" />
+						<line x1="66" y1="5" x2="72" y2="70" stroke="white" strokeWidth="2.5" strokeLinecap="round" opacity="0.14" />
 					</svg>
+
+					{/* Canvas inside glass with metaball filter + clip */}
+					<div
+						className="absolute inset-0 overflow-hidden"
+						style={{
+							clipPath: "polygon(8% 0%, 92% 0%, 82% 100%, 18% 100%)",
+						}}
+					>
+						<div style={{ filter: "url(#fluid-metaball)", width: "100%", height: "100%", background: "transparent" }}>
+							<canvas
+								ref={canvasRef}
+								style={{ width: "100%", height: "100%", display: "block", background: "transparent" }}
+							/>
+						</div>
+					</div>
 				</div>
 
-				<p className="font-serif text-xl font-bold text-[var(--c-brand)]">{activeDrink}</p>
-				<p className="text-xs text-[var(--c-text-dim)]">
-					{fill <= 0 ? "All gone!" : isDrinking ? "Sipping..." : "Tilt left/right to swirl. Tilt toward you to sip."}
-				</p>
-				{fill <= 0 && (
-					<button
-						type="button"
-						onClick={() => setFill(0.75)}
-						className="rounded-full border border-[var(--c-border)] px-4 py-2 text-xs font-semibold text-[var(--c-text-mid)] transition hover:bg-[var(--c-muted)]"
-					>
-						Refill
-					</button>
-				)}
+				<p className="text-xs text-[var(--c-text-dim)]">Tilt to swirl</p>
 			</div>
 
 			{/* Drink picker */}
@@ -2824,11 +3057,10 @@ function GlassEasterEgg({ onClose }: { onClose: () => void }) {
 							key={d}
 							type="button"
 							onClick={() => setActiveDrink(d)}
+							style={activeDrink === d ? { background: drinkHex, borderColor: drinkHex, color: "white" } : undefined}
 							className={cx(
 								"rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-								activeDrink === d
-									? "border-[var(--c-brand)] bg-[var(--c-brand)] text-white"
-									: "border-[var(--c-border)] text-[var(--c-text-muted)] hover:bg-[var(--c-muted)]",
+								activeDrink !== d && "border-[var(--c-border)] text-[var(--c-text-muted)] hover:bg-[var(--c-muted)]",
 							)}
 						>
 							{d}
